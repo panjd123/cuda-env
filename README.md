@@ -25,29 +25,73 @@ When `CUDA_ENV_USE_PROXY=1` is enabled, `compose.sh` will:
 - bake the same proxy exports into the container user's `~/.bashrc`
 - enable the proxy-specific Compose override so the container still runs on bridge networking and can reach LAN resources and the host via `host.docker.internal`
 
-If you also want Codex config imported into the image without committing plaintext `.codex/` to GitHub:
+If you also want host secrets imported into the image without committing plaintext files to GitHub:
 
 ```bash
-export CODEX_CONFIG_PASSPHRASE='choose-a-long-passphrase'
-./compose.sh codex-seal
+export DEV_SECRETS_PASSPHRASE='choose-a-long-passphrase'
+./compose.sh secrets-seal
 CUDA_ENV_USE_PROXY=1 ./compose.sh build
 ```
 
 The intended workflow is:
 
-- keep the local plaintext config in `.codex/`, which is ignored by git
-- generate a repo-safe encrypted bundle at `.codex.encrypted/config.tar.gz.enc`
-- keep both `.codex/` and `.codex.encrypted/` out of the Docker build context
-- during `build`, use plaintext `.codex/` if it exists locally; otherwise decrypt `.codex.encrypted/config.tar.gz.enc` on the host and send the plaintext archive into the image build
-- restore the files into the container user's `~/.codex/` after `@openai/codex` is installed
+- keep local plaintext files under `.dev-secrets/`, which is ignored by git
+- generate a repo-safe encrypted bundle at `.dev-secrets.encrypted/bundle.tar.gz.enc`
+- keep both `.dev-secrets/` and `.dev-secrets.encrypted/` out of the Docker build context
+- during `build`, use plaintext `.dev-secrets/` if it exists locally; otherwise decrypt `.dev-secrets.encrypted/bundle.tar.gz.enc` on the host and send the plaintext archive into the image build
+- restore supported subdirectories into the container user's home only if they exist in the bundle
 
 Useful commands:
 
 ```bash
-export CODEX_CONFIG_PASSPHRASE='choose-a-long-passphrase'
-./compose.sh codex-seal
-./compose.sh codex-unseal
+export DEV_SECRETS_PASSPHRASE='choose-a-long-passphrase'
+./compose.sh secrets-seal
+./compose.sh secrets-unseal
 ```
+
+### Secrets Layout
+
+The plaintext directory is a single bundle root:
+
+```text
+.dev-secrets/
+  codex/
+    auth.json
+    config.toml
+  ssh/
+    id_ed25519
+    id_ed25519.pub
+    config
+    known_hosts
+```
+
+Current supported targets are:
+
+- `.dev-secrets/codex/` -> container `~/.codex/`
+- `.dev-secrets/ssh/` -> container `~/.ssh/`
+
+### Secrets Notes
+
+- `.dev-secrets/` is local plaintext and should not be pushed.
+- `.dev-secrets.encrypted/bundle.tar.gz.enc` is the repo-safe encrypted bundle you can commit and push.
+- `.dockerignore` excludes both `.dev-secrets/` and `.dev-secrets.encrypted/`, so neither plaintext nor encrypted secrets are sent as Docker build context.
+- Decryption happens on the host inside `compose.sh`, not inside Docker build and not inside the final image.
+- Because decryption happens on the host, the image does not need `DEV_SECRETS_PASSPHRASE`, and the passphrase is not baked into image layers.
+- During `./compose.sh build`, the script resolves secrets in this order:
+  - if local plaintext `.dev-secrets/` exists, use it directly
+  - otherwise, if `.dev-secrets.encrypted/bundle.tar.gz.enc` exists, decrypt it on the host and use that result
+  - otherwise, build continues without importing any secrets
+- `DEV_SECRETS_PASSPHRASE` is required for:
+  - `./compose.sh secrets-seal`
+  - `./compose.sh secrets-unseal`
+  - `./compose.sh build` when only the encrypted bundle exists and local plaintext `.dev-secrets/` does not exist
+- If you edit files under `.dev-secrets/`, run `./compose.sh secrets-seal` again before pushing, otherwise the encrypted bundle in git will be stale.
+- If you clone the repo onto another machine and only have `.dev-secrets.encrypted/bundle.tar.gz.enc`, either:
+  - run `./compose.sh secrets-unseal` first to restore local plaintext `.dev-secrets/`
+  - or run `DEV_SECRETS_PASSPHRASE=... ./compose.sh build` and let the script decrypt on the host during build
+- The Docker build import is optional. If `DEV_SECRETS_ARCHIVE_B64` is empty, the image skips all secret copy steps.
+- Inside the image, each supported target is copied only when its source directory exists. For example, if the bundle has only `codex/` and no `ssh/`, then `~/.ssh/` is left untouched.
+- Imported files end up in the container user's home, and the build sets directory permissions to `0700` and file permissions to `0600`.
 
 The resulting image tag is:
 
@@ -87,10 +131,10 @@ Stop and remove the container:
   - build uses host networking
   - build and runtime both receive the host proxy environment
   - runtime keeps bridge networking and also gets `host.docker.internal`
-- Codex config handling is split:
-  - plaintext local config lives in `.codex/` and is git-ignored
-  - repo-safe encrypted config lives in `.codex.encrypted/config.tar.gz.enc`
-  - build imports plaintext config into the image only after it is resolved on the host
+- Secret handling is split:
+  - plaintext local files live in `.dev-secrets/` and are git-ignored
+  - repo-safe encrypted secrets live in `.dev-secrets.encrypted/bundle.tar.gz.enc`
+  - build imports optional secrets into the image only after they are resolved on the host
 - `compose.sh` now auto-detects `NVIDIA_DRIVER_BRANCH` from the host driver version when you do not set it yourself.
 - when `CUDA_ENV_USE_PROXY` is not set, the base Compose behavior is unchanged
 - The container is configured with `restart: unless-stopped`.

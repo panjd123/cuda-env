@@ -12,4 +12,5 @@ Thumbs.db
 
 .idea/
 .vscode/
-.codex/
+.dev-secrets/
+.ssh/

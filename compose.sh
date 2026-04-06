@@ -14,9 +14,9 @@ export LOCAL_UID="${LOCAL_UID:-$(id -u)}"
 export LOCAL_GID="${LOCAL_GID:-$(id -g)}"
 export BUILDAH_FORMAT="${BUILDAH_FORMAT:-docker}"
 
-CODEX_CONFIG_DIR=".codex"
-CODEX_CONFIG_ENCRYPTED_DIR=".codex.encrypted"
-CODEX_CONFIG_ENCRYPTED_FILE="${CODEX_CONFIG_ENCRYPTED_DIR}/config.tar.gz.enc"
+DEV_SECRETS_DIR=".dev-secrets"
+DEV_SECRETS_ENCRYPTED_DIR=".dev-secrets.encrypted"
+DEV_SECRETS_ENCRYPTED_FILE="${DEV_SECRETS_ENCRYPTED_DIR}/bundle.tar.gz.enc"
 
 get_docker_info_proxy() {
   local field="$1"
@@ -48,79 +48,79 @@ sync_proxy_env() {
   fi
 }
 
-require_codex_config_passphrase() {
-  if [[ -z "${CODEX_CONFIG_PASSPHRASE:-}" ]]; then
-    echo "CODEX_CONFIG_PASSPHRASE is required for this Codex config operation." >&2
+require_dev_secrets_passphrase() {
+  if [[ -z "${DEV_SECRETS_PASSPHRASE:-}" ]]; then
+    echo "DEV_SECRETS_PASSPHRASE is required for this secrets operation." >&2
     exit 1
   fi
 }
 
 require_openssl() {
   if ! command -v openssl >/dev/null 2>&1; then
-    echo "openssl is required for this Codex config operation." >&2
+    echo "openssl is required for this secrets operation." >&2
     exit 1
   fi
 }
 
-seal_codex_config() {
-  require_codex_config_passphrase
+seal_dev_secrets() {
+  require_dev_secrets_passphrase
   require_openssl
 
-  if [[ ! -d "${CODEX_CONFIG_DIR}" ]]; then
-    echo "Missing ${CODEX_CONFIG_DIR}; nothing to seal." >&2
+  if [[ ! -d "${DEV_SECRETS_DIR}" ]]; then
+    echo "Missing ${DEV_SECRETS_DIR}; nothing to seal." >&2
     exit 1
   fi
 
-  mkdir -p "${CODEX_CONFIG_ENCRYPTED_DIR}"
-  tar -C . -czf - "${CODEX_CONFIG_DIR}" | \
-    openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:CODEX_CONFIG_PASSPHRASE \
-      -out "${CODEX_CONFIG_ENCRYPTED_FILE}"
-  chmod 0600 "${CODEX_CONFIG_ENCRYPTED_FILE}"
-  echo "Wrote encrypted Codex config to ${CODEX_CONFIG_ENCRYPTED_FILE}"
+  mkdir -p "${DEV_SECRETS_ENCRYPTED_DIR}"
+  tar -C . -czf - "${DEV_SECRETS_DIR}" | \
+    openssl enc -aes-256-cbc -salt -pbkdf2 -pass env:DEV_SECRETS_PASSPHRASE \
+      -out "${DEV_SECRETS_ENCRYPTED_FILE}"
+  chmod 0600 "${DEV_SECRETS_ENCRYPTED_FILE}"
+  echo "Wrote encrypted secrets bundle to ${DEV_SECRETS_ENCRYPTED_FILE}"
 }
 
-unseal_codex_config() {
-  require_codex_config_passphrase
+unseal_dev_secrets() {
+  require_dev_secrets_passphrase
   require_openssl
 
-  if [[ ! -f "${CODEX_CONFIG_ENCRYPTED_FILE}" ]]; then
-    echo "Missing ${CODEX_CONFIG_ENCRYPTED_FILE}; nothing to unseal." >&2
+  if [[ ! -f "${DEV_SECRETS_ENCRYPTED_FILE}" ]]; then
+    echo "Missing ${DEV_SECRETS_ENCRYPTED_FILE}; nothing to unseal." >&2
     exit 1
   fi
 
-  openssl enc -d -aes-256-cbc -pbkdf2 -pass env:CODEX_CONFIG_PASSPHRASE \
-    -in "${CODEX_CONFIG_ENCRYPTED_FILE}" | \
+  openssl enc -d -aes-256-cbc -pbkdf2 -pass env:DEV_SECRETS_PASSPHRASE \
+    -in "${DEV_SECRETS_ENCRYPTED_FILE}" | \
     tar -xzf - -C .
-  find "${CODEX_CONFIG_DIR}" -type d -exec chmod 0700 {} +
-  find "${CODEX_CONFIG_DIR}" -type f -exec chmod 0600 {} +
-  echo "Restored plaintext Codex config into ${CODEX_CONFIG_DIR}"
+  find "${DEV_SECRETS_DIR}" -type d -exec chmod 0700 {} +
+  find "${DEV_SECRETS_DIR}" -type f -exec chmod 0600 {} +
+  echo "Restored plaintext secrets into ${DEV_SECRETS_DIR}"
 }
 
-prepare_codex_config_archive() {
-  unset CODEX_CONFIG_ARCHIVE_B64 || true
+prepare_dev_secrets_archive() {
+  unset DEV_SECRETS_ARCHIVE_B64 || true
 
-  if [[ -d "${CODEX_CONFIG_DIR}" ]]; then
-    export CODEX_CONFIG_ARCHIVE_B64="$(
-      tar -C . -czf - "${CODEX_CONFIG_DIR}" | base64 -w0
+  if [[ -d "${DEV_SECRETS_DIR}" ]]; then
+    export DEV_SECRETS_ARCHIVE_B64="$(
+      tar -C . -czf - "${DEV_SECRETS_DIR}" | base64 -w0
     )"
     return
   fi
 
-  if [[ ! -f "${CODEX_CONFIG_ENCRYPTED_FILE}" ]]; then
+  if [[ ! -f "${DEV_SECRETS_ENCRYPTED_FILE}" ]]; then
     return
   fi
 
-  require_codex_config_passphrase
+  require_dev_secrets_passphrase
   require_openssl
 
-  export CODEX_CONFIG_ARCHIVE_B64="$(
-    openssl enc -d -aes-256-cbc -pbkdf2 -pass env:CODEX_CONFIG_PASSPHRASE \
-      -in "${CODEX_CONFIG_ENCRYPTED_FILE}" | \
+  export DEV_SECRETS_ARCHIVE_B64="$(
+    openssl enc -d -aes-256-cbc -pbkdf2 -pass env:DEV_SECRETS_PASSPHRASE \
+      -in "${DEV_SECRETS_ENCRYPTED_FILE}" | \
       base64 -w0
   )"
 }
 
-should_prepare_codex_config_archive() {
+should_prepare_dev_secrets_archive() {
   local arg
 
   for arg in "$@"; do
@@ -134,14 +134,14 @@ should_prepare_codex_config_archive() {
   return 1
 }
 
-handle_codex_config_command() {
+handle_dev_secrets_command() {
   case "${1:-}" in
-    codex-seal)
-      seal_codex_config
+    secrets-seal)
+      seal_dev_secrets
       exit 0
       ;;
-    codex-unseal)
-      unseal_codex_config
+    secrets-unseal)
+      unseal_dev_secrets
       exit 0
       ;;
   esac
@@ -169,10 +169,10 @@ detect_nvidia_driver_branch() {
   fi
 }
 
-handle_codex_config_command "${1:-}"
+handle_dev_secrets_command "${1:-}"
 detect_nvidia_driver_branch
-if should_prepare_codex_config_archive "$@"; then
-  prepare_codex_config_archive
+if should_prepare_dev_secrets_archive "$@"; then
+  prepare_dev_secrets_archive
 fi
 
 compose_files=("${COMPOSE_FILE:-docker-compose.yml}")

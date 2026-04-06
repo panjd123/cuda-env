@@ -11,7 +11,7 @@ ARG DOTFILE_REPO_URL=https://github.com/panjd123/dotfile.git
 ARG NVM_VERSION=v0.40.4
 ARG NODE_VERSION=24.14.1
 ARG CLAUDE_CODE_VERSION=latest
-ARG CODEX_CONFIG_ARCHIVE_B64
+ARG DEV_SECRETS_ARCHIVE_B64
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
@@ -255,16 +255,27 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     source "${BASH_ENV}" && \
     uv tool install nvidia-htop
 
-# Node-based CLI tools.
+# Node-based CLI tools and optional host secrets import.
 RUN source "${BASH_ENV}" && \
     npm install -g @openai/codex && \
-    if [[ -n "${CODEX_CONFIG_ARCHIVE_B64:-}" ]]; then \
-        mkdir -p "${HOME}/.codex" && \
-        printf '%s' "${CODEX_CONFIG_ARCHIVE_B64}" | \
+    if [[ -n "${DEV_SECRETS_ARCHIVE_B64:-}" ]]; then \
+        tmpdir="$(mktemp -d)" && \
+        printf '%s' "${DEV_SECRETS_ARCHIVE_B64}" | \
             base64 -d | \
-            tar -xzf - -C "${HOME}" && \
-        find "${HOME}/.codex" -type d -exec chmod 0700 {} + && \
-        find "${HOME}/.codex" -type f -exec chmod 0600 {} +; \
+            tar -xzf - -C "${tmpdir}" && \
+        if [[ -d "${tmpdir}/.dev-secrets/codex" ]]; then \
+            mkdir -p "${HOME}/.codex" && \
+            cp -a "${tmpdir}/.dev-secrets/codex/." "${HOME}/.codex/"; \
+            find "${HOME}/.codex" -type d -exec chmod 0700 {} +; \
+            find "${HOME}/.codex" -type f -exec chmod 0600 {} +; \
+        fi && \
+        if [[ -d "${tmpdir}/.dev-secrets/ssh" ]]; then \
+            mkdir -p "${HOME}/.ssh" && \
+            cp -a "${tmpdir}/.dev-secrets/ssh/." "${HOME}/.ssh/"; \
+            find "${HOME}/.ssh" -type d -exec chmod 0700 {} +; \
+            find "${HOME}/.ssh" -type f -exec chmod 0600 {} +; \
+        fi && \
+        rm -rf "${tmpdir}"; \
     fi
 
 # Claude Code native installer.
