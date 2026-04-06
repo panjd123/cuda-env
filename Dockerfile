@@ -101,6 +101,16 @@ RUN apt-get update && \
     update-alternatives --set cuda /usr/local/cuda-12.8 && \
     rm -rf /var/lib/apt/lists/*
 
+# Install the host-matched NVIDIA userspace tools so containers get nvidia-smi
+# and the driver-side CUDA libraries needed by the runtime.
+ARG NVIDIA_DRIVER_BRANCH=560
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libnvidia-compute-${NVIDIA_DRIVER_BRANCH} \
+    nvidia-compute-utils-${NVIDIA_DRIVER_BRANCH} \
+    nvidia-utils-${NVIDIA_DRIVER_BRANCH} && \
+    rm -rf /var/lib/apt/lists/*
+
 # System-level initialization.
 RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
     echo "${TZ}" > /etc/timezone && \
@@ -110,13 +120,35 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
     mkdir -p /var/run/sshd
 
 # Create the container user to match the host identity.
-RUN groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}" && \
-    useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /bin/bash "${LOCAL_USER}" && \
+RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
+        groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
+    fi && \
+    if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
+        usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /bin/bash "${LOCAL_USER}"; \
+    elif getent passwd "${LOCAL_UID}" >/dev/null; then \
+        EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
+        usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /bin/bash "${EXISTING_USER}"; \
+    else \
+        useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /bin/bash "${LOCAL_USER}"; \
+    fi && \
     usermod -aG sudo "${LOCAL_USER}" && \
     echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
     chmod 0440 "/etc/sudoers.d/${LOCAL_USER}" && \
     mkdir -p /workspace && \
     chown "${LOCAL_UID}:${LOCAL_GID}" /workspace
+
+# Minimal sshd hardening for key-based access to the development user.
+RUN mkdir -p "/etc/ssh/sshd_config.d" "/home/${LOCAL_USER}/.ssh" && \
+    printf '%s\n' \
+        "PubkeyAuthentication yes" \
+        "PasswordAuthentication no" \
+        "KbdInteractiveAuthentication no" \
+        "PermitRootLogin no" \
+        "AllowUsers ${LOCAL_USER}" \
+        "AuthorizedKeysFile .ssh/authorized_keys" \
+        > "/etc/ssh/sshd_config.d/10-cuda-env.conf" && \
+    chmod 0700 "/home/${LOCAL_USER}/.ssh" && \
+    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh"
 
 ENV LOCAL_USER=${LOCAL_USER} \
     GIT_USER=${GIT_USER} \
@@ -171,6 +203,8 @@ RUN git config --global user.name "${GIT_USER}" && \
 # Personal shell dotfiles. Avoid the repo's interactive install flow in Docker.
 RUN git clone "${DOTFILE_REPO_URL}" "${HOME}/.dotfile" && \
     bash "${HOME}/.dotfile/bashrc_common.sh" refresh-region && \
+    source "${HOME}/.dotfile/bashrc_common.sh" && \
+    dotfile_apply_key_changes && \
     if ! grep -qF 'source "$HOME/.dotfile/bashrc_common.sh"' "${HOME}/.bashrc"; then \
         printf '\nsource "$HOME/.dotfile/bashrc_common.sh"\n' >> "${HOME}/.bashrc"; \
     fi && \
@@ -185,10 +219,22 @@ RUN curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/inst
     nvm alias default "${NODE_VERSION}" && \
     nvm use default
 
-# Rust toolchain and cargo-installed TUI tools.
+# Rust toolchain and prebuilt TUI tools.
+ARG ZELLIJ_VERSION=v0.44.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
     source "${BASH_ENV}" && \
-    cargo install --locked zellij
+    arch="$(uname -m)" && \
+    case "${arch}" in \
+        x86_64) zellij_arch="x86_64-unknown-linux-musl" ;; \
+        aarch64|arm64) zellij_arch="aarch64-unknown-linux-musl" ;; \
+        *) echo "Unsupported zellij architecture: ${arch}" >&2; exit 1 ;; \
+    esac && \
+    zellij_url="https://github.com/zellij-org/zellij/releases/download/${ZELLIJ_VERSION}/zellij-${zellij_arch}.tar.gz" && \
+    curl -fsSL "${zellij_url}" -o /tmp/zellij.tar.gz && \
+    tar -xzf /tmp/zellij.tar.gz -C /tmp zellij && \
+    install -m 0755 /tmp/zellij "${HOME}/.local/bin/zellij" && \
+    "${HOME}/.local/bin/zellij" --version && \
+    rm -f /tmp/zellij /tmp/zellij.tar.gz
 
 # Python-adjacent developer tooling managed by uv.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
@@ -201,5 +247,7 @@ RUN source "${BASH_ENV}" && \
 
 # Claude Code native installer.
 RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
+
+EXPOSE 22
 
 CMD ["/bin/bash"]
