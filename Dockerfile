@@ -11,6 +11,13 @@ ARG DOTFILE_REPO_URL=https://github.com/panjd123/dotfile.git
 ARG NVM_VERSION=v0.40.4
 ARG NODE_VERSION=24.14.1
 ARG CLAUDE_CODE_VERSION=latest
+ARG CODEX_CONFIG_ARCHIVE_B64
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -18,6 +25,12 @@ ENV TZ=Asia/Shanghai \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     CUDA_HOME=/usr/local/cuda
+
+RUN printf '%s\n' \
+    'Acquire::Retries "5";' \
+    'Acquire::http::Timeout "30";' \
+    'Acquire::https::Timeout "30";' \
+    > /etc/apt/apt.conf.d/80-cuda-env-retries
 
 # Base system packages for CUDA/C++ development and general shell use.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -37,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     file \
     less \
+    neovim \
     vim \
     nano \
     tmux \
@@ -47,6 +61,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsof \
     ripgrep \
     fd-find \
+    cloc \
     bash-completion \
     software-properties-common \
     tzdata \
@@ -81,12 +96,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-dev \
     libffi-dev \
     liblzma-dev \
-    tk-dev && \
-    rm -rf /var/lib/apt/lists/*
+    tk-dev
 
 # Install additional side-by-side CUDA toolkits on top of the 13.2 base image.
-RUN apt-get update && \
-    if ! apt-cache show cuda-toolkit-12-8 >/dev/null 2>&1; then \
+RUN if ! apt-cache show cuda-toolkit-12-8 >/dev/null 2>&1; then \
         wget -qO /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
         dpkg -i /tmp/cuda-keyring.deb && \
         rm -f /tmp/cuda-keyring.deb && \
@@ -98,18 +111,15 @@ RUN apt-get update && \
     update-alternatives --install /usr/local/cuda cuda /usr/local/cuda-12.8 120800 && \
     update-alternatives --install /usr/local/cuda cuda /usr/local/cuda-13.0 130000 && \
     update-alternatives --install /usr/local/cuda cuda /usr/local/cuda-13.2 130200 && \
-    update-alternatives --set cuda /usr/local/cuda-12.8 && \
-    rm -rf /var/lib/apt/lists/*
+    update-alternatives --set cuda /usr/local/cuda-12.8
 
 # Install the host-matched NVIDIA userspace tools so containers get nvidia-smi
 # and the driver-side CUDA libraries needed by the runtime.
 ARG NVIDIA_DRIVER_BRANCH=560
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+RUN apt-get install -y --no-install-recommends \
     libnvidia-compute-${NVIDIA_DRIVER_BRANCH} \
     nvidia-compute-utils-${NVIDIA_DRIVER_BRANCH} \
-    nvidia-utils-${NVIDIA_DRIVER_BRANCH} && \
-    rm -rf /var/lib/apt/lists/*
+    nvidia-utils-${NVIDIA_DRIVER_BRANCH}
 
 # System-level initialization.
 RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
@@ -150,6 +160,10 @@ RUN mkdir -p "/etc/ssh/sshd_config.d" "/home/${LOCAL_USER}/.ssh" && \
     chmod 0700 "/home/${LOCAL_USER}/.ssh" && \
     chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh"
 
+# Keep apt indexes around while package installation is still ongoing, then
+# clean them once at the end so intermediate layers can reuse the metadata.
+RUN rm -rf /var/lib/apt/lists/*
+
 ENV LOCAL_USER=${LOCAL_USER} \
     GIT_USER=${GIT_USER} \
     GIT_EMAIL=${GIT_EMAIL} \
@@ -171,6 +185,14 @@ RUN mkdir -p \
     "${CARGO_HOME}" \
     "${RUSTUP_HOME}" && \
     touch "${BASH_ENV}" && \
+    for proxy_target in "${BASH_ENV}" "/home/${LOCAL_USER}/.bashrc"; do \
+        for proxy_var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do \
+            proxy_value="${!proxy_var:-}"; \
+            if [[ -n "${proxy_value}" ]]; then \
+                printf 'export %s=%q\n' "${proxy_var}" "${proxy_value}" >> "${proxy_target}"; \
+            fi; \
+        done; \
+    done && \
     echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >> "${BASH_ENV}" && \
     echo 'export CUDA_HOME="/usr/local/cuda"' >> "${BASH_ENV}" && \
     echo 'export PATH="/usr/local/cuda/bin:$PATH"' >> "${BASH_ENV}" && \
@@ -219,22 +241,14 @@ RUN curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/inst
     nvm alias default "${NODE_VERSION}" && \
     nvm use default
 
-# Rust toolchain and prebuilt TUI tools.
+# Rust toolchain and source-built TUI tools.
 ARG ZELLIJ_VERSION=v0.44.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
     source "${BASH_ENV}" && \
-    arch="$(uname -m)" && \
-    case "${arch}" in \
-        x86_64) zellij_arch="x86_64-unknown-linux-musl" ;; \
-        aarch64|arm64) zellij_arch="aarch64-unknown-linux-musl" ;; \
-        *) echo "Unsupported zellij architecture: ${arch}" >&2; exit 1 ;; \
-    esac && \
-    zellij_url="https://github.com/zellij-org/zellij/releases/download/${ZELLIJ_VERSION}/zellij-${zellij_arch}.tar.gz" && \
-    curl -fsSL "${zellij_url}" -o /tmp/zellij.tar.gz && \
-    tar -xzf /tmp/zellij.tar.gz -C /tmp zellij && \
-    install -m 0755 /tmp/zellij "${HOME}/.local/bin/zellij" && \
-    "${HOME}/.local/bin/zellij" --version && \
-    rm -f /tmp/zellij /tmp/zellij.tar.gz
+    cargo install --locked --version "${ZELLIJ_VERSION#v}" zellij && \
+    cargo install --locked yazi-fm yazi-cli && \
+    zellij --version && \
+    yazi --version
 
 # Python-adjacent developer tooling managed by uv.
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
@@ -243,7 +257,15 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 
 # Node-based CLI tools.
 RUN source "${BASH_ENV}" && \
-    npm install -g @openai/codex
+    npm install -g @openai/codex && \
+    if [[ -n "${CODEX_CONFIG_ARCHIVE_B64:-}" ]]; then \
+        mkdir -p "${HOME}/.codex" && \
+        printf '%s' "${CODEX_CONFIG_ARCHIVE_B64}" | \
+            base64 -d | \
+            tar -xzf - -C "${HOME}" && \
+        find "${HOME}/.codex" -type d -exec chmod 0700 {} + && \
+        find "${HOME}/.codex" -type f -exec chmod 0600 {} +; \
+    fi
 
 # Claude Code native installer.
 RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"

@@ -10,6 +10,45 @@ Build the image:
 ./compose.sh build
 ```
 
+If this machine needs the host proxy setup, use one unified switch:
+
+```bash
+CUDA_ENV_USE_PROXY=1 ./compose.sh build
+```
+
+When `CUDA_ENV_USE_PROXY=1` is enabled, `compose.sh` will:
+
+- switch the build phase to host networking
+- prefer the host's lowercase `http_proxy` / `https_proxy` / `no_proxy`, then fall back to uppercase values or Docker daemon proxy settings
+- forward the resolved proxy values into image build args
+- forward the same proxy variables into the running container
+- bake the same proxy exports into the container user's `~/.bashrc`
+- enable the proxy-specific Compose override so the container still runs on bridge networking and can reach LAN resources and the host via `host.docker.internal`
+
+If you also want Codex config imported into the image without committing plaintext `.codex/` to GitHub:
+
+```bash
+export CODEX_CONFIG_PASSPHRASE='choose-a-long-passphrase'
+./compose.sh codex-seal
+CUDA_ENV_USE_PROXY=1 ./compose.sh build
+```
+
+The intended workflow is:
+
+- keep the local plaintext config in `.codex/`, which is ignored by git
+- generate a repo-safe encrypted bundle at `.codex.encrypted/config.tar.gz.enc`
+- keep both `.codex/` and `.codex.encrypted/` out of the Docker build context
+- during `build`, use plaintext `.codex/` if it exists locally; otherwise decrypt `.codex.encrypted/config.tar.gz.enc` on the host and send the plaintext archive into the image build
+- restore the files into the container user's `~/.codex/` after `@openai/codex` is installed
+
+Useful commands:
+
+```bash
+export CODEX_CONFIG_PASSPHRASE='choose-a-long-passphrase'
+./compose.sh codex-seal
+./compose.sh codex-unseal
+```
+
 The resulting image tag is:
 
 ```text
@@ -44,6 +83,16 @@ Stop and remove the container:
 
 - `compose.sh` prefers `~/.local/bin/docker` when it exists.
 - On this machine, that `docker` is a Podman-compatible wrapper pointed at the NVMe-backed container store.
+- `CUDA_ENV_USE_PROXY=1` is the single switch for proxy-aware behavior:
+  - build uses host networking
+  - build and runtime both receive the host proxy environment
+  - runtime keeps bridge networking and also gets `host.docker.internal`
+- Codex config handling is split:
+  - plaintext local config lives in `.codex/` and is git-ignored
+  - repo-safe encrypted config lives in `.codex.encrypted/config.tar.gz.enc`
+  - build imports plaintext config into the image only after it is resolved on the host
+- `compose.sh` now auto-detects `NVIDIA_DRIVER_BRANCH` from the host driver version when you do not set it yourself.
+- when `CUDA_ENV_USE_PROXY` is not set, the base Compose behavior is unchanged
 - The container is configured with `restart: unless-stopped`.
 - The container now stays alive by running `sshd` in the foreground.
 - Host port `22847` is mapped to container port `22`.
@@ -62,7 +111,8 @@ nvidia-utils-${NVIDIA_DRIVER_BRANCH}
 ```
 
 - This is required so the container has `nvidia-smi`, `libcuda.so`, and `libnvidia-ml.so`.
-- `NVIDIA_DRIVER_BRANCH` is passed from `docker-compose.yml` and currently defaults to `560`.
+- `compose.sh` will auto-export `NVIDIA_DRIVER_BRANCH` from the host driver version, and an explicitly set `NVIDIA_DRIVER_BRANCH` still wins.
+- If host auto-detection is unavailable and you bypass `compose.sh`, `docker-compose.yml` still falls back to `560`.
 
 ## SSH Notes
 
@@ -137,8 +187,9 @@ Examples:
 
 - `560.35.05` -> use `NVIDIA_DRIVER_BRANCH=560`
 - `570.x` -> use `NVIDIA_DRIVER_BRANCH=570`
+- `590.48.01` -> use `NVIDIA_DRIVER_BRANCH=590`
 
-If this is wrong, `nvidia-smi` inside the container may fail or CUDA runtime may report driver/runtime incompatibility.
+`compose.sh` now does this detection automatically from the host `nvidia-smi` output. If this is wrong, `nvidia-smi` inside the container may fail or CUDA runtime may report driver/runtime incompatibility.
 
 ### 4. `nvidia-smi` and CUDA Device Count Can Differ
 
