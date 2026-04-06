@@ -10,6 +10,12 @@ Build the image:
 ./compose.sh build
 ```
 
+The resulting image tag is:
+
+```text
+panjd123/cuda-env:13.2.0
+```
+
 Start the container:
 
 ```bash
@@ -188,7 +194,7 @@ ssh-keyscan -p 22847 127.0.0.1
 Verify the image exists:
 
 ```bash
-docker images | rg cuda-dev
+docker images | rg 'panjd123/cuda-env'
 ```
 
 ## If You Switch Machines Later
