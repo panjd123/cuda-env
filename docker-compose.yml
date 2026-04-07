@@ -15,7 +15,7 @@ services:
         NVIDIA_DRIVER_BRANCH: ${NVIDIA_DRIVER_BRANCH:-}
     image: panjd123/cuda-env:${CUDA_VERSION:-13.2.0}
     container_name: ${COMPOSE_PROJECT_NAME:-cuda-env}-dev
-    working_dir: /workspace/cuda-env
+    working_dir: /workspace
     tty: true
     stdin_open: true
     restart: unless-stopped
