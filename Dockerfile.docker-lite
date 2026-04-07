@@ -1,0 +1,176 @@
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LOCAL_USER=devuser
+ARG LOCAL_UID=1000
+ARG LOCAL_GID=1000
+ARG DOTFILE_REPO_URL=https://github.com/panjd123/dotfile.git
+ARG NODE_VERSION=24.14.1
+ARG DEV_SECRETS_ARCHIVE_B64
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    SHELL=/usr/bin/zsh \
+    DEV_SHELL_ENV=/home/${LOCAL_USER}/.shell_env \
+    NPM_CONFIG_PREFIX=/home/${LOCAL_USER}/.local \
+    BASH_ENV=/home/${LOCAL_USER}/.shell_env
+
+RUN printf '%s\n' \
+    'Acquire::Retries "5";' \
+    'Acquire::http::Timeout "30";' \
+    'Acquire::https::Timeout "30";' \
+    > /etc/apt/apt.conf.d/80-docker-lite-retries
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    gh \
+    jq \
+    less \
+    openssh-server \
+    openssh-client \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python-is-python3 \
+    sudo \
+    tmux \
+    unzip \
+    xz-utils \
+    zsh
+
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    . /etc/os-release && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    docker-ce-cli \
+    docker-buildx-plugin \
+    docker-compose-plugin
+
+RUN arch="$(dpkg --print-architecture)" && \
+    case "${arch}" in \
+        amd64) node_arch="x64" ;; \
+        arm64) node_arch="arm64" ;; \
+        *) echo "Unsupported Node.js architecture: ${arch}" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" -o /tmp/node.tar.xz && \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && \
+    node --version && \
+    npm --version && \
+    rm -f /tmp/node.tar.xz
+
+RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
+        groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
+    fi && \
+    if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
+        usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
+    elif getent passwd "${LOCAL_UID}" >/dev/null; then \
+        EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
+        usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
+    else \
+        useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+    fi && \
+    usermod -aG sudo "${LOCAL_USER}" && \
+    echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
+    chmod 0440 "/etc/sudoers.d/${LOCAL_USER}" && \
+    mkdir -p /workspace /var/run/sshd "/home/${LOCAL_USER}/.ssh" /etc/ssh/sshd_config.d && \
+    chown "${LOCAL_UID}:${LOCAL_GID}" /workspace && \
+    chown -R "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh" && \
+    chmod 0700 "/home/${LOCAL_USER}/.ssh"
+
+RUN printf '%s\n' \
+    "PubkeyAuthentication yes" \
+    "PasswordAuthentication no" \
+    "KbdInteractiveAuthentication no" \
+    "PermitRootLogin no" \
+    "AllowUsers ${LOCAL_USER}" \
+    "AuthorizedKeysFile .ssh/authorized_keys" \
+    > /etc/ssh/sshd_config.d/10-docker-lite.conf
+
+RUN rm -rf /var/lib/apt/lists/*
+
+USER ${LOCAL_USER}
+WORKDIR /workspace
+
+RUN mkdir -p "$HOME/.local/bin" "$HOME/.ssh" && \
+    chmod 0700 "$HOME/.ssh" && \
+    touch "${DEV_SHELL_ENV}" && \
+    printf '%s\n' \
+        'if [[ -n "${DEV_SHELL_ENV_LOADED:-}" ]]; then' \
+        '    return 0' \
+        'fi' \
+        'DEV_SHELL_ENV_LOADED=1' \
+        '' \
+        'export PATH="$HOME/.local/bin:$PATH"' \
+        'export NPM_CONFIG_PREFIX="$HOME/.local"' \
+        > "${DEV_SHELL_ENV}" && \
+    for proxy_var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do \
+        proxy_value="${!proxy_var:-}"; \
+        if [[ -n "${proxy_value}" ]]; then \
+            printf 'export %s=%q\n' "${proxy_var}" "${proxy_value}" >> "${DEV_SHELL_ENV}"; \
+        fi; \
+    done && \
+    printf '%s\n' \
+        '[ -f "$HOME/.shell_env" ] && . "$HOME/.shell_env"' \
+        > "/home/${LOCAL_USER}/.bashrc" && \
+    printf '%s\n' \
+        '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"' \
+        > "/home/${LOCAL_USER}/.bash_profile" && \
+    printf '%s\n' \
+        '[ -f "$HOME/.shell_env" ] && source "$HOME/.shell_env"' \
+        > "$HOME/.zprofile" && \
+    printf '%s\n' \
+        'export ZSH="$HOME/.oh-my-zsh"' \
+        'ZSH_THEME="robbyrussell"' \
+        'plugins=(git docker python tmux zsh-autosuggestions zsh-syntax-highlighting)' \
+        '[ -f "$HOME/.shell_env" ] && source "$HOME/.shell_env"' \
+        '[ -f "$ZSH/oh-my-zsh.sh" ] && source "$ZSH/oh-my-zsh.sh"' \
+        > "$HOME/.zshrc"
+
+# Personal shell dotfiles. Reuse the repo's non-interactive install entrypoint
+# while keeping sshd managed by this image and letting dotfile manage
+# authorized_keys.
+RUN git clone "${DOTFILE_REPO_URL}" "${HOME}/.dotfile" && \
+    bash "${HOME}/.dotfile/bashrc_common.sh" install -y --ssh-keys=apply --sshd=skip
+
+RUN RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" && \
+    git clone https://github.com/zsh-users/zsh-autosuggestions "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions" && \
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
+
+RUN npm install -g @openai/codex && \
+    if [[ -n "${DEV_SECRETS_ARCHIVE_B64:-}" ]]; then \
+        tmpdir="$(mktemp -d)" && \
+        printf '%s' "${DEV_SECRETS_ARCHIVE_B64}" | \
+            base64 -d | \
+            tar -xzf - -C "${tmpdir}" && \
+        if [[ -d "${tmpdir}/.dev-secrets/codex" ]]; then \
+            mkdir -p "${HOME}/.codex" && \
+            cp -a "${tmpdir}/.dev-secrets/codex/." "${HOME}/.codex/"; \
+            find "${HOME}/.codex" -type d -exec chmod 0700 {} +; \
+            find "${HOME}/.codex" -type f -exec chmod 0600 {} +; \
+        fi && \
+        if [[ -d "${tmpdir}/.dev-secrets/ssh" ]]; then \
+            mkdir -p "${HOME}/.ssh" && \
+            cp -a "${tmpdir}/.dev-secrets/ssh/." "${HOME}/.ssh/"; \
+            find "${HOME}/.ssh" -type d -exec chmod 0700 {} +; \
+            find "${HOME}/.ssh" -type f -exec chmod 0600 {} +; \
+        fi && \
+        rm -rf "${tmpdir}"; \
+    fi
+
+CMD ["sudo", "/usr/sbin/sshd", "-D", "-e"]

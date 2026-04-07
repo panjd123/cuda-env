@@ -1,0 +1,28 @@
+services:
+  docker-lite:
+    build:
+      context: .
+      dockerfile: Dockerfile.docker-lite
+      network: ${DOCKER_LITE_BUILD_NETWORK:-default}
+      args:
+        LOCAL_USER: ${LOCAL_USER:-devuser}
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
+        NODE_VERSION: ${NODE_VERSION:-24.14.1}
+        DEV_SECRETS_ARCHIVE_B64: ${DEV_SECRETS_ARCHIVE_B64:-}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+    image: panjd123/docker-lite:${NODE_VERSION:-24.14.1}
+    container_name: docker-lite-dev
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    volumes:
+      - .:/workspace
+    ports:
+      - "22848:22"

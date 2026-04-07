@@ -114,13 +114,30 @@ RUN if ! apt-cache show cuda-toolkit-12-8 >/dev/null 2>&1; then \
     update-alternatives --install /usr/local/cuda cuda /usr/local/cuda-13.2 130200 && \
     update-alternatives --set cuda /usr/local/cuda-12.8
 
+# Install Docker CLI tooling so the container can target the host engine through
+# a mounted Docker socket.
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    . /etc/os-release && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    docker-ce-cli \
+    docker-buildx-plugin \
+    docker-compose-plugin
+
 # Install the host-matched NVIDIA userspace tools so containers get nvidia-smi
 # and the driver-side CUDA libraries needed by the runtime.
-ARG NVIDIA_DRIVER_BRANCH=560
-RUN apt-get install -y --no-install-recommends \
-    libnvidia-compute-${NVIDIA_DRIVER_BRANCH} \
-    nvidia-compute-utils-${NVIDIA_DRIVER_BRANCH} \
-    nvidia-utils-${NVIDIA_DRIVER_BRANCH}
+ARG NVIDIA_DRIVER_BRANCH
+RUN if [[ -n "${NVIDIA_DRIVER_BRANCH:-}" ]]; then \
+        apt-get install -y --no-install-recommends \
+        libnvidia-compute-${NVIDIA_DRIVER_BRANCH} \
+        nvidia-compute-utils-${NVIDIA_DRIVER_BRANCH} \
+        nvidia-utils-${NVIDIA_DRIVER_BRANCH}; \
+    else \
+        echo "Skipping NVIDIA userspace package install because NVIDIA_DRIVER_BRANCH is empty."; \
+    fi
 
 # System-level initialization.
 RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
@@ -145,11 +162,13 @@ RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
     usermod -aG sudo "${LOCAL_USER}" && \
     echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
     chmod 0440 "/etc/sudoers.d/${LOCAL_USER}" && \
-    mkdir -p /workspace && \
+    mkdir -p /workspace "/home/${LOCAL_USER}/.ssh" && \
+    chmod 0700 "/home/${LOCAL_USER}/.ssh" && \
+    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh" && \
     chown "${LOCAL_UID}:${LOCAL_GID}" /workspace
 
 # Minimal sshd hardening for key-based access to the development user.
-RUN mkdir -p "/etc/ssh/sshd_config.d" "/home/${LOCAL_USER}/.ssh" && \
+RUN mkdir -p "/etc/ssh/sshd_config.d" && \
     printf '%s\n' \
         "PubkeyAuthentication yes" \
         "PasswordAuthentication no" \
@@ -157,9 +176,7 @@ RUN mkdir -p "/etc/ssh/sshd_config.d" "/home/${LOCAL_USER}/.ssh" && \
         "PermitRootLogin no" \
         "AllowUsers ${LOCAL_USER}" \
         "AuthorizedKeysFile .ssh/authorized_keys" \
-        > "/etc/ssh/sshd_config.d/10-cuda-env.conf" && \
-    chmod 0700 "/home/${LOCAL_USER}/.ssh" && \
-    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh"
+        > "/etc/ssh/sshd_config.d/10-cuda-env.conf"
 
 # Keep apt indexes around while package installation is still ongoing, then
 # clean them once at the end so intermediate layers can reuse the metadata.
@@ -171,61 +188,70 @@ ENV LOCAL_USER=${LOCAL_USER} \
     DOTFILE_REPO_URL=${DOTFILE_REPO_URL} \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     SHELL=/usr/bin/zsh \
+    DEV_SHELL_ENV=/home/${LOCAL_USER}/.shell_env \
+    NPM_CONFIG_PREFIX=/home/${LOCAL_USER}/.local \
     NVM_DIR=/home/${LOCAL_USER}/.nvm \
     CARGO_HOME=/home/${LOCAL_USER}/.cargo \
     RUSTUP_HOME=/home/${LOCAL_USER}/.rustup \
     UV_NO_MODIFY_PATH=1 \
-    BASH_ENV=/home/${LOCAL_USER}/.bash_env \
+    BASH_ENV=/home/${LOCAL_USER}/.shell_env \
     NVM_SYMLINK_CURRENT=true \
     PATH=/home/${LOCAL_USER}/.local/bin:/home/${LOCAL_USER}/.cargo/bin:/home/${LOCAL_USER}/.nvm/current/bin:/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH}
 
-# User shell bootstrap and reusable environment wiring.
+USER ${LOCAL_USER}
+WORKDIR /workspace
+
+# User shell bootstrap and reusable environment wiring shared by bash and zsh.
 RUN mkdir -p \
-    "/home/${LOCAL_USER}/.local/bin" \
+    "$HOME/.local/bin" \
     "${NVM_DIR}" \
     "${CARGO_HOME}" \
-    "${RUSTUP_HOME}" && \
-    touch "${BASH_ENV}" && \
-    for proxy_target in "${BASH_ENV}" "/home/${LOCAL_USER}/.bashrc"; do \
-        for proxy_var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do \
-            proxy_value="${!proxy_var:-}"; \
-            if [[ -n "${proxy_value}" ]]; then \
-                printf 'export %s=%q\n' "${proxy_var}" "${proxy_value}" >> "${proxy_target}"; \
-            fi; \
-        done; \
+    "${RUSTUP_HOME}" \
+    "$HOME/.ssh" && \
+    chmod 0700 "$HOME/.ssh" && \
+    touch "${DEV_SHELL_ENV}" && \
+    printf '%s\n' \
+        'if [[ -n "${DEV_SHELL_ENV_LOADED:-}" ]]; then' \
+        '    return 0' \
+        'fi' \
+        'DEV_SHELL_ENV_LOADED=1' \
+        '' \
+        'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' \
+        'export NPM_CONFIG_PREFIX="$HOME/.local"' \
+        'export CUDA_HOME="/usr/local/cuda"' \
+        'export PATH="/usr/local/cuda/bin:$PATH"' \
+        'export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH:-}"' \
+        'export NVM_DIR="$HOME/.nvm"' \
+        'export CARGO_HOME="$HOME/.cargo"' \
+        'export RUSTUP_HOME="$HOME/.rustup"' \
+        '[ -s "$CARGO_HOME/env" ] && . "$CARGO_HOME/env"' \
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' \
+        '[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"' \
+        > "${DEV_SHELL_ENV}" && \
+    for proxy_var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do \
+        proxy_value="${!proxy_var:-}"; \
+        if [[ -n "${proxy_value}" ]]; then \
+            printf 'export %s=%q\n' "${proxy_var}" "${proxy_value}" >> "${DEV_SHELL_ENV}"; \
+        fi; \
     done && \
-    echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >> "${BASH_ENV}" && \
-    echo 'export CUDA_HOME="/usr/local/cuda"' >> "${BASH_ENV}" && \
-    echo 'export PATH="/usr/local/cuda/bin:$PATH"' >> "${BASH_ENV}" && \
-    echo 'export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH:-}"' >> "${BASH_ENV}" && \
-    echo 'export NVM_DIR="$HOME/.nvm"' >> "${BASH_ENV}" && \
-    echo 'export CARGO_HOME="$HOME/.cargo"' >> "${BASH_ENV}" && \
-    echo 'export RUSTUP_HOME="$HOME/.rustup"' >> "${BASH_ENV}" && \
-    echo '[ -s "$CARGO_HOME/env" ] && . "$CARGO_HOME/env"' >> "${BASH_ENV}" && \
-    echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> "${BASH_ENV}" && \
-    echo '[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"' >> "${BASH_ENV}" && \
-    echo '. "$BASH_ENV"' >> "/home/${LOCAL_USER}/.bashrc" && \
+    printf '%s\n' \
+        '[ -f "$HOME/.shell_env" ] && . "$HOME/.shell_env"' \
+        > "$HOME/.bashrc" && \
+    printf '%s\n' \
+        '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"' \
+        > "$HOME/.bash_profile" && \
+    printf '%s\n' \
+        '[ -f "$HOME/.shell_env" ] && source "$HOME/.shell_env"' \
+        > "$HOME/.zprofile" && \
     printf '%s\n' \
         'export ZSH="$HOME/.oh-my-zsh"' \
         'ZSH_THEME="robbyrussell"' \
-        'plugins=(git)' \
+        'plugins=(git zsh-autosuggestions zsh-syntax-highlighting)' \
         '' \
-        '[ -f "$HOME/.bash_env" ] && source "$HOME/.bash_env"' \
-        '[ -f "$HOME/.dotfile/bashrc_common.sh" ] && source "$HOME/.dotfile/bashrc_common.sh"' \
+        '[ -f "$HOME/.shell_env" ] && source "$HOME/.shell_env"' \
         '[ -f "$ZSH/oh-my-zsh.sh" ] && source "$ZSH/oh-my-zsh.sh"' \
-        > "/home/${LOCAL_USER}/.zshrc" && \
-    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.zshrc" && \
-    chown -R "${LOCAL_UID}:${LOCAL_GID}" \
-    "/home/${LOCAL_USER}/.local" \
-    "${NVM_DIR}" \
-    "${CARGO_HOME}" \
-    "${RUSTUP_HOME}" && \
-    chown "${LOCAL_UID}:${LOCAL_GID}" "${BASH_ENV}" && \
-    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.bashrc"
-
-USER ${LOCAL_USER}
-WORKDIR /workspace
+        > "$HOME/.zshrc"
 
 # User-level Git defaults.
 RUN git config --global user.name "${GIT_USER}" && \
@@ -234,24 +260,17 @@ RUN git config --global user.name "${GIT_USER}" && \
     git config --global core.editor nano && \
     git config --global pull.rebase false
 
-# Personal shell dotfiles. Avoid the repo's interactive install flow in Docker.
+# Personal shell dotfiles. Reuse the repo's non-interactive install entrypoint
+# while keeping sshd managed by this image and letting dotfile manage
+# authorized_keys.
 RUN git clone "${DOTFILE_REPO_URL}" "${HOME}/.dotfile" && \
-    bash "${HOME}/.dotfile/bashrc_common.sh" refresh-region && \
-    source "${HOME}/.dotfile/bashrc_common.sh" && \
-    dotfile_apply_key_changes && \
-    if ! grep -qF 'source "$HOME/.dotfile/bashrc_common.sh"' "${HOME}/.bashrc"; then \
-        printf '\nsource "$HOME/.dotfile/bashrc_common.sh"\n' >> "${HOME}/.bashrc"; \
-    fi && \
-    if ! grep -qF 'source "$HOME/.dotfile/bashrc_common.sh"' "${BASH_ENV}"; then \
-        printf '\nsource "$HOME/.dotfile/bashrc_common.sh"\n' >> "${BASH_ENV}"; \
-    fi
+    bash "${HOME}/.dotfile/bashrc_common.sh" install -y --ssh-keys=apply --sshd=skip
 
 # Install and wire up Oh My Zsh without changing shell interactively.
 RUN RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" && \
-    if ! grep -qF 'source "$HOME/.dotfile/bashrc_common.sh"' "${HOME}/.zshrc"; then \
-        printf '\n[ -f "$HOME/.dotfile/bashrc_common.sh" ] && source "$HOME/.dotfile/bashrc_common.sh"\n' >> "${HOME}/.zshrc"; \
-    fi
+    git clone https://github.com/zsh-users/zsh-autosuggestions "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions" && \
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
 
 # Node runtime via nvm.
 RUN curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | PROFILE="${BASH_ENV}" bash && \
@@ -302,4 +321,4 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
 
 EXPOSE 22
 
-CMD ["/usr/bin/zsh"]
+CMD ["sudo", "/usr/sbin/sshd", "-D", "-e"]

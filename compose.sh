@@ -17,6 +17,110 @@ export BUILDAH_FORMAT="${BUILDAH_FORMAT:-docker}"
 DEV_SECRETS_DIR=".dev-secrets"
 DEV_SECRETS_ENCRYPTED_DIR=".dev-secrets.encrypted"
 DEV_SECRETS_ENCRYPTED_FILE="${DEV_SECRETS_ENCRYPTED_DIR}/bundle.tar.gz.enc"
+COMPOSE_BASE_FILE="docker-compose.yml"
+SOCKET_OVERRIDE_FILE="docker-compose.socket.yml"
+PROXY_OVERRIDE_FILE="docker-compose.proxy.yml"
+
+print_help() {
+  printf '%s\n' \
+    'Usage:' \
+    '  ./compose.sh [cuda|lite] <docker-compose-subcommand> [args...]' \
+    '  ./compose.sh help' \
+    '  ./compose.sh --help' \
+    '' \
+    'This script wraps `docker compose` for this repository and automatically:' \
+    '  - exports LOCAL_USER / LOCAL_UID / LOCAL_GID from the current host user' \
+    '  - auto-detects NVIDIA_DRIVER_BRANCH from the host when available' \
+    '  - enables target-specific Docker socket overrides when a host Docker socket is present' \
+    '  - enables target-specific proxy overrides when CUDA_ENV_USE_PROXY=1' \
+    '  - prepares optional encrypted dev secrets during build-like commands' \
+    '' \
+    'Wrapper-only commands:' \
+    '  secrets-seal       Encrypt .dev-secrets/ into .dev-secrets.encrypted/bundle.tar.gz.enc' \
+    '  secrets-unseal     Decrypt .dev-secrets.encrypted/bundle.tar.gz.enc back into .dev-secrets/' \
+    '  compose-help       Show upstream `docker compose` top-level help' \
+    '' \
+    'Common examples:' \
+    '  ./compose.sh build' \
+    '  ./compose.sh lite build' \
+    '  ./compose.sh up -d' \
+    '  ./compose.sh lite up -d' \
+    '  ./compose.sh down' \
+    '  ./compose.sh ps' \
+    '  ./compose.sh logs -f' \
+    '  ./compose.sh exec cuda-dev /usr/bin/zsh' \
+    '  ./compose.sh lite exec docker-lite /usr/bin/zsh' \
+    '  ./compose.sh config' \
+    '  ./compose.sh build --no-cache' \
+    '' \
+    'Targets:' \
+    '  cuda        Main CUDA environment (default when omitted)' \
+    '  lite        Smaller Docker-focused debug environment' \
+    '' \
+    'Compose passthrough:' \
+    '  Any command other than the wrapper-only commands above is forwarded to `docker compose`.' \
+    '  Example: `./compose.sh build --help` shows help for `docker compose build`.' \
+    '' \
+    'Environment switches:' \
+    '  CUDA_ENV_USE_PROXY=1          Enable proxy-aware build/runtime overrides' \
+    '  CUDA_ENV_USE_DOCKER_SOCKET=0  Disable automatic Docker socket override' \
+    '  NVIDIA_DRIVER_BRANCH=590      Override host driver branch auto-detection' \
+    '  DEV_SECRETS_PASSPHRASE=...    Required for secrets-seal / secrets-unseal, and encrypted build import' \
+    '  DOCKER_SOCKET_PATH=...        Override the Docker socket path to mount' \
+    '  DOCKER_SOCKET_GID=...         Override the Docker socket group id inside compose' \
+    '' \
+    'Notes:' \
+    '  - `./compose.sh --help` shows this wrapper help.' \
+    '  - `./compose.sh lite --help` also shows this wrapper help.' \
+    '  - `./compose.sh compose-help` shows top-level `docker compose` help.' \
+    '  - `./compose.sh <subcommand> --help` shows help for that Docker Compose subcommand.'
+}
+
+parse_target() {
+  case "${1:-}" in
+    cuda|cuda-env|main)
+      shift
+      ;;
+    lite|docker-lite)
+      COMPOSE_BASE_FILE="docker-compose.docker-lite.yml"
+      SOCKET_OVERRIDE_FILE="docker-compose.docker-lite.socket.yml"
+      PROXY_OVERRIDE_FILE="docker-compose.docker-lite.proxy.yml"
+      shift
+      ;;
+  esac
+
+  ARGS=("$@")
+}
+
+handle_help_command() {
+  case "${1:-}" in
+    ""|-h|--help|help)
+      print_help
+      exit 0
+      ;;
+    compose-help)
+      exec "${DOCKER_BIN}" compose --help
+      ;;
+  esac
+}
+
+detect_docker_socket() {
+  local socket_path="${DOCKER_SOCKET_PATH:-/var/run/docker.sock}"
+
+  if [[ "${CUDA_ENV_USE_DOCKER_SOCKET:-1}" != "1" ]]; then
+    return
+  fi
+
+  if [[ ! -S "${socket_path}" ]]; then
+    return
+  fi
+
+  export DOCKER_SOCKET_PATH="${socket_path}"
+  if [[ -z "${DOCKER_SOCKET_GID:-}" ]]; then
+    export DOCKER_SOCKET_GID
+    DOCKER_SOCKET_GID="$(stat -c '%g' "${socket_path}")"
+  fi
+}
 
 get_docker_info_proxy() {
   local field="$1"
@@ -169,13 +273,21 @@ detect_nvidia_driver_branch() {
   fi
 }
 
-handle_dev_secrets_command "${1:-}"
+parse_target "$@"
+
+handle_help_command "${ARGS[0]:-}"
+handle_dev_secrets_command "${ARGS[0]:-}"
 detect_nvidia_driver_branch
-if should_prepare_dev_secrets_archive "$@"; then
+detect_docker_socket
+if should_prepare_dev_secrets_archive "${ARGS[@]}"; then
   prepare_dev_secrets_archive
 fi
 
-compose_files=("${COMPOSE_FILE:-docker-compose.yml}")
+compose_files=("${COMPOSE_FILE:-${COMPOSE_BASE_FILE}}")
+
+if [[ -n "${DOCKER_SOCKET_PATH:-}" ]]; then
+  compose_files+=("${SOCKET_OVERRIDE_FILE}")
+fi
 
 if [[ "${CUDA_ENV_USE_PROXY:-0}" == "1" ]]; then
   sync_proxy_env "HTTP_PROXY" "http_proxy" "HttpProxy"
@@ -186,9 +298,9 @@ if [[ "${CUDA_ENV_USE_PROXY:-0}" == "1" ]]; then
     echo "CUDA_ENV_USE_PROXY=1 is set, but no host proxy environment was found; only the proxy override profile will be enabled." >&2
   fi
 
-  compose_files+=("docker-compose.proxy.yml")
+  compose_files+=("${PROXY_OVERRIDE_FILE}")
 fi
 
 export COMPOSE_FILE="$(IFS=:; printf '%s' "${compose_files[*]}")"
 
-exec "${DOCKER_BIN}" compose "$@"
+exec "${DOCKER_BIN}" compose "${ARGS[@]}"

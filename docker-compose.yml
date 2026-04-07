@@ -12,7 +12,7 @@ services:
         NODE_VERSION: ${NODE_VERSION:-24.14.1}
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
         DEV_SECRETS_ARCHIVE_B64: ${DEV_SECRETS_ARCHIVE_B64:-}
-        NVIDIA_DRIVER_BRANCH: ${NVIDIA_DRIVER_BRANCH:-560}
+        NVIDIA_DRIVER_BRANCH: ${NVIDIA_DRIVER_BRANCH:-}
     image: panjd123/cuda-env:${CUDA_VERSION:-13.2.0}
     container_name: ${COMPOSE_PROJECT_NAME:-cuda-env}-dev
     working_dir: /workspace
@@ -37,8 +37,3 @@ services:
       - ${HOME}/.cache/huggingface:/home/${LOCAL_USER:-devuser}/.cache/huggingface
     ports:
       - "22847:22"
-    command:
-      - sudo
-      - /usr/sbin/sshd
-      - -D
-      - -e

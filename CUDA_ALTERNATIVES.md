@@ -114,9 +114,9 @@ hash -r
 
 更简单的做法是：切换后直接开一个新的 shell。
 
-## 6. 推荐的 `.bashrc` 写法
+## 6. 推荐的 `.zshrc` 写法
 
-如果你希望永远跟随 `/usr/local/cuda`，推荐在 `~/.bashrc` 里只写这一套：
+如果你希望永远跟随 `/usr/local/cuda`，推荐在默认交互终端使用的 `~/.zshrc` 里只写这一套：
 
 ```bash
 export CUDA_HOME=/usr/local/cuda
@@ -124,7 +124,7 @@ export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:$LD_LIBRARY_PATH
 ```
 
-不要把 `12.8`、`13.0`、`13.2` 这种具体版本硬编码进 `.bashrc`。
+不要把 `12.8`、`13.0`、`13.2` 这种具体版本硬编码进 `.zshrc`。
 
 ## 7. 新增一个 CUDA 版本时怎么做
 
@@ -156,6 +156,6 @@ nvcc --version
 当前这个容器就是按这个最小方案实现的：
 
 - `update-alternatives --install ...`
-- `.bashrc` 里统一指向 `/usr/local/cuda`
+- `.zshrc` 里统一指向 `/usr/local/cuda`
 
 对个人开发容器，这通常已经够用了。
