@@ -43,7 +43,7 @@ docker exec -it cuda-env-dev /usr/bin/zsh
 SSH into it:
 
 ```bash
-ssh -p 22847 cc@127.0.0.1
+ssh -p 22847 "${LOCAL_USER:-$(id -un)}"@127.0.0.1
 ```
 
 Stop it:
@@ -58,8 +58,9 @@ Stop it:
 `docker compose` and automatically:
 
 - exports `LOCAL_USER` / `LOCAL_UID` / `LOCAL_GID` from the current host user
+- falls back to `uid=0,gid=0` for the container user when rootless Docker cannot map the host uid/gid into image builds
 - auto-detects `NVIDIA_DRIVER_BRANCH` from the host when available
-- auto-enables target-specific Docker socket overrides when a host Docker socket is present
+- auto-enables target-specific Docker socket overrides from the active Docker endpoint when possible
 - auto-enables target-specific proxy overrides when `CUDA_ENV_USE_PROXY=1`
 - prepares optional encrypted dev secrets during build-like commands
 - supports both the main CUDA environment and the smaller `docker-lite` target
@@ -72,6 +73,7 @@ Useful commands:
 ./compose.sh down
 ./compose.sh ps
 ./compose.sh logs -f
+./compose.sh doctor
 ./compose.sh config
 ./compose.sh exec cuda-dev /usr/bin/zsh
 ./compose.sh compose-help
@@ -127,20 +129,44 @@ Supported import targets inside images:
 - `.dev-secrets/codex/` -> `~/.codex/`
 - `.dev-secrets/ssh/` -> `~/.ssh/`
 
-More details: [docs/secrets.md](/home/panjunda/cuda-env/docs/secrets.md)
+More details: [docs/secrets.md](docs/secrets.md)
 
 ## Docker Socket
 
 The main image and `docker-lite` both use Docker-outside-of-Docker through the
-host socket, not a nested daemon.
+active Docker Unix socket, not a nested daemon.
 
-When `/var/run/docker.sock` exists and `CUDA_ENV_USE_DOCKER_SOCKET` is not `0`,
-`compose.sh` automatically enables the socket override for the main container.
+When the current Docker endpoint resolves to a Unix socket and
+`CUDA_ENV_USE_DOCKER_SOCKET` is not `0`, `compose.sh` automatically enables the
+socket override for the selected target. That works for both standard
+`/var/run/docker.sock` setups and rootless endpoints such as
+`/run/user/<uid>/docker.sock`.
 
 If you want to disable that behavior:
 
 ```bash
 CUDA_ENV_USE_DOCKER_SOCKET=0 ./compose.sh up -d
+```
+
+Inspect what `compose.sh` resolved on the current machine:
+
+```bash
+./compose.sh doctor
+```
+
+## Validation
+
+What matters on the host side is already preserved under rootless Docker:
+
+- host `ps` shows the container shim and GPU workloads as the host user running the rootless Docker daemon
+- host `nvidia-smi` reports CUDA processes launched from `cuda-env` with the same host-side owner
+- the main image includes `ncu`, and profiling from inside `cuda-env` works when the host driver allows performance counters
+
+Useful checks:
+
+```bash
+./compose.sh doctor
+docker exec cuda-env-dev /usr/bin/zsh -lc 'ncu --version'
 ```
 
 ## Docker Lite
@@ -160,8 +186,9 @@ Build and start it through the same wrapper:
 ./compose.sh lite up -d
 ```
 
-If you want to run it directly with `docker compose`, for example when preparing
-an encrypted secrets archive yourself:
+For cross-host portability, prefer `compose.sh`. If you need to run
+`docker compose` directly, first resolve the active Docker Unix socket and pick
+the matching override file:
 
 ```bash
 export DEV_SECRETS_PASSPHRASE='choose-a-long-passphrase'
@@ -169,10 +196,20 @@ export DEV_SECRETS_ARCHIVE_B64="$(
   openssl enc -d -aes-256-cbc -pbkdf2 -pass env:DEV_SECRETS_PASSPHRASE \
     -in .dev-secrets.encrypted/bundle.tar.gz.enc | base64 -w0
 )"
-export DOCKER_SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"
+export DOCKER_SOCKET_PATH="$(
+  docker context inspect "$(docker context show)" \
+    --format '{{ (index .Endpoints "docker").Host }}' |
+    sed -n 's#^unix://##p'
+)"
+if [[ "${DOCKER_SOCKET_PATH}" == /run/user/*/docker.sock ]]; then
+  export SOCKET_OVERRIDE_FILE=docker-compose.docker-lite.rootless-socket.yml
+else
+  export DOCKER_SOCKET_GID="$(stat -c '%g' "${DOCKER_SOCKET_PATH}")"
+  export SOCKET_OVERRIDE_FILE=docker-compose.docker-lite.socket.yml
+fi
 docker compose \
   -f docker-compose.docker-lite.yml \
-  -f docker-compose.docker-lite.socket.yml \
+  -f "${SOCKET_OVERRIDE_FILE}" \
   up -d --build
 ```
 
@@ -191,11 +228,11 @@ docker exec -it docker-lite-dev /usr/bin/zsh
 SSH into it:
 
 ```bash
-ssh -p 22848 cc@127.0.0.1
+ssh -p 22848 "${LOCAL_USER:-$(id -un)}"@127.0.0.1
 ```
 
 ## Docs
 
-- [CUDA_ALTERNATIVES.md](/home/panjunda/cuda-env/CUDA_ALTERNATIVES.md): switching `/usr/local/cuda` between installed toolkits
-- [docs/secrets.md](/home/panjunda/cuda-env/docs/secrets.md): encrypted secrets workflow and import behavior
-- [docs/runtime-notes.md](/home/panjunda/cuda-env/docs/runtime-notes.md): GPU, SSH, Docker socket, and migration notes
+- [CUDA_ALTERNATIVES.md](CUDA_ALTERNATIVES.md): switching `/usr/local/cuda` between installed toolkits
+- [docs/secrets.md](docs/secrets.md): encrypted secrets workflow and import behavior
+- [docs/runtime-notes.md](docs/runtime-notes.md): GPU, SSH, Docker socket, and migration notes

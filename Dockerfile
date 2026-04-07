@@ -148,16 +148,24 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
     mkdir -p /var/run/sshd
 
 # Create the container user to match the host identity.
-RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
-        groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
-    fi && \
-    if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
-        usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
-    elif getent passwd "${LOCAL_UID}" >/dev/null; then \
-        EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
-        usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
+RUN if [[ "${LOCAL_UID}" == "0" && "${LOCAL_GID}" == "0" && "${LOCAL_USER}" != "root" ]]; then \
+        if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
+            usermod --non-unique --uid 0 --gid 0 --home "/home/${LOCAL_USER}" --move-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        else \
+            useradd --non-unique --uid 0 --gid 0 --create-home --home-dir "/home/${LOCAL_USER}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        fi; \
     else \
-        useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        if ! getent group "${LOCAL_GID}" >/dev/null; then \
+            groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
+        fi; \
+        if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
+            usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        elif getent passwd "${LOCAL_UID}" >/dev/null; then \
+            EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
+            usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
+        else \
+            useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        fi; \
     fi && \
     usermod -aG sudo "${LOCAL_USER}" && \
     echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
@@ -169,11 +177,15 @@ RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
 
 # Minimal sshd hardening for key-based access to the development user.
 RUN mkdir -p "/etc/ssh/sshd_config.d" && \
+    permit_root_login="no" && \
+    if [[ "${LOCAL_UID}" == "0" ]]; then \
+        permit_root_login="prohibit-password"; \
+    fi && \
     printf '%s\n' \
         "PubkeyAuthentication yes" \
         "PasswordAuthentication no" \
         "KbdInteractiveAuthentication no" \
-        "PermitRootLogin no" \
+        "PermitRootLogin ${permit_root_login}" \
         "AllowUsers ${LOCAL_USER}" \
         "AuthorizedKeysFile .ssh/authorized_keys" \
         > "/etc/ssh/sshd_config.d/10-cuda-env.conf"
@@ -187,9 +199,9 @@ ENV LOCAL_USER=${LOCAL_USER} \
     GIT_EMAIL=${GIT_EMAIL} \
     DOTFILE_REPO_URL=${DOTFILE_REPO_URL} \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
+    HOME=/home/${LOCAL_USER} \
     SHELL=/usr/bin/zsh \
     DEV_SHELL_ENV=/home/${LOCAL_USER}/.shell_env \
-    NPM_CONFIG_PREFIX=/home/${LOCAL_USER}/.local \
     NVM_DIR=/home/${LOCAL_USER}/.nvm \
     CARGO_HOME=/home/${LOCAL_USER}/.cargo \
     RUSTUP_HOME=/home/${LOCAL_USER}/.rustup \
@@ -218,7 +230,6 @@ RUN mkdir -p \
         'DEV_SHELL_ENV_LOADED=1' \
         '' \
         'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' \
-        'export NPM_CONFIG_PREFIX="$HOME/.local"' \
         'export CUDA_HOME="/usr/local/cuda"' \
         'export PATH="/usr/local/cuda/bin:$PATH"' \
         'export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH:-}"' \
@@ -272,19 +283,28 @@ RUN RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
     git clone https://github.com/zsh-users/zsh-autosuggestions "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions" && \
     git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
 
-# Node runtime via nvm.
+# Node runtime via nvm. nvm refuses to run while npm's global prefix is set,
+# so temporarily clear it and source nvm directly from NVM_DIR.
 RUN curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | PROFILE="${BASH_ENV}" bash && \
-    source "${BASH_ENV}" && \
+    tmp_bash_env="$(mktemp)" && \
+    if [[ -f "${DEV_SHELL_ENV}" ]]; then \
+        grep -E '^(export (http_proxy|https_proxy|no_proxy|HTTP_PROXY|HTTPS_PROXY|NO_PROXY)=)' "${DEV_SHELL_ENV}" > "${tmp_bash_env}" || true; \
+    fi && \
+    unset NPM_CONFIG_PREFIX npm_config_prefix && \
+    export NVM_DIR="${NVM_DIR}" && \
+    export BASH_ENV="${tmp_bash_env}" && \
+    . "${NVM_DIR}/nvm.sh" && \
     nvm install "${NODE_VERSION}" && \
     nvm alias default "${NODE_VERSION}" && \
-    nvm use default
+    nvm use default && \
+    rm -f "${tmp_bash_env}"
 
 # Rust toolchain and source-built TUI tools.
 ARG ZELLIJ_VERSION=v0.44.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
-    source "${BASH_ENV}" && \
+    . "${CARGO_HOME}/env" && \
     cargo install --locked --version "${ZELLIJ_VERSION#v}" zellij && \
-    cargo install --locked yazi-fm yazi-cli && \
+    cargo install --force yazi-build && \
     zellij --version && \
     yazi --version
 

@@ -19,9 +19,9 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV TZ=Asia/Shanghai \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
+    HOME=/home/${LOCAL_USER} \
     SHELL=/usr/bin/zsh \
     DEV_SHELL_ENV=/home/${LOCAL_USER}/.shell_env \
-    NPM_CONFIG_PREFIX=/home/${LOCAL_USER}/.local \
     BASH_ENV=/home/${LOCAL_USER}/.shell_env
 
 RUN printf '%s\n' \
@@ -73,16 +73,24 @@ RUN arch="$(dpkg --print-architecture)" && \
     npm --version && \
     rm -f /tmp/node.tar.xz
 
-RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
-        groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
-    fi && \
-    if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
-        usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
-    elif getent passwd "${LOCAL_UID}" >/dev/null; then \
-        EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
-        usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
+RUN if [[ "${LOCAL_UID}" == "0" && "${LOCAL_GID}" == "0" && "${LOCAL_USER}" != "root" ]]; then \
+        if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
+            usermod --non-unique --uid 0 --gid 0 --home "/home/${LOCAL_USER}" --move-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        else \
+            useradd --non-unique --uid 0 --gid 0 --create-home --home-dir "/home/${LOCAL_USER}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        fi; \
     else \
-        useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        if ! getent group "${LOCAL_GID}" >/dev/null; then \
+            groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
+        fi; \
+        if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
+            usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        elif getent passwd "${LOCAL_UID}" >/dev/null; then \
+            EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
+            usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
+        else \
+            useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        fi; \
     fi && \
     usermod -aG sudo "${LOCAL_USER}" && \
     echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
@@ -92,14 +100,18 @@ RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
     chown -R "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh" && \
     chmod 0700 "/home/${LOCAL_USER}/.ssh"
 
-RUN printf '%s\n' \
-    "PubkeyAuthentication yes" \
-    "PasswordAuthentication no" \
-    "KbdInteractiveAuthentication no" \
-    "PermitRootLogin no" \
-    "AllowUsers ${LOCAL_USER}" \
-    "AuthorizedKeysFile .ssh/authorized_keys" \
-    > /etc/ssh/sshd_config.d/10-docker-lite.conf
+RUN permit_root_login="no" && \
+    if [[ "${LOCAL_UID}" == "0" ]]; then \
+        permit_root_login="prohibit-password"; \
+    fi && \
+    printf '%s\n' \
+        "PubkeyAuthentication yes" \
+        "PasswordAuthentication no" \
+        "KbdInteractiveAuthentication no" \
+        "PermitRootLogin ${permit_root_login}" \
+        "AllowUsers ${LOCAL_USER}" \
+        "AuthorizedKeysFile .ssh/authorized_keys" \
+        > /etc/ssh/sshd_config.d/10-docker-lite.conf
 
 RUN rm -rf /var/lib/apt/lists/*
 
@@ -116,7 +128,6 @@ RUN mkdir -p "$HOME/.local/bin" "$HOME/.ssh" && \
         'DEV_SHELL_ENV_LOADED=1' \
         '' \
         'export PATH="$HOME/.local/bin:$PATH"' \
-        'export NPM_CONFIG_PREFIX="$HOME/.local"' \
         > "${DEV_SHELL_ENV}" && \
     for proxy_var in http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY; do \
         proxy_value="${!proxy_var:-}"; \

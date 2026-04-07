@@ -1,0 +1,6 @@
+services:
+  docker-lite:
+    environment:
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - ${DOCKER_SOCKET_PATH}:/var/run/docker.sock

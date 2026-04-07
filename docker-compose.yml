@@ -34,6 +34,6 @@ services:
       HF_HOME: /home/${LOCAL_USER:-devuser}/.cache/huggingface
     volumes:
       - .:/workspace
-      - ${HOME}/.cache/huggingface:/home/${LOCAL_USER:-devuser}/.cache/huggingface
+      - ${CUDA_ENV_HF_CACHE_DIR}:/home/${LOCAL_USER:-devuser}/.cache/huggingface
     ports:
       - "22847:22"

@@ -6,12 +6,13 @@ for debugging, migration, and host-specific setup validation.
 ## Current Behavior
 
 - `compose.sh` prefers `~/.local/bin/docker` when it exists.
-- On this machine, `docker` is the standard Docker Engine CLI talking to `/var/run/docker.sock`.
+- `compose.sh` resolves the active Docker endpoint from `DOCKER_HOST` or the current Docker context, so both rootful and rootless Unix sockets work.
 - `CUDA_ENV_USE_PROXY=1` is the single switch for proxy-aware behavior:
   - build uses host networking
   - build and runtime both receive the host proxy environment
   - runtime keeps bridge networking and also gets `host.docker.internal`
-- When `/var/run/docker.sock` exists and `CUDA_ENV_USE_DOCKER_SOCKET` is not set to `0`, `compose.sh` automatically adds the target-specific socket override so either image can talk to the host Docker engine.
+- When the active Docker endpoint resolves to a Unix socket and `CUDA_ENV_USE_DOCKER_SOCKET` is not set to `0`, `compose.sh` automatically adds the target-specific socket override so either image can talk to the host Docker engine.
+- On rootless Docker, `compose.sh` can automatically fall back to `uid=0,gid=0` for the container user when the host uid/gid are outside the mapped subuid/subgid range.
 - `compose.sh` auto-detects `NVIDIA_DRIVER_BRANCH` from the host driver version unless you set it explicitly.
 - Both images default to running `sshd` in the foreground from their Dockerfiles.
 - Host port `22847` maps to `cuda-env:22`.
@@ -56,18 +57,19 @@ Installing the matching userspace packages fixes that.
 
 ### 1. Docker Engine Expectations
 
-On this host, `docker` talks directly to Docker Engine through the default Unix
-socket:
+`docker` may talk to Docker Engine through either a rootful or rootless Unix
+socket, depending on the active context:
 
 ```bash
 type docker
 docker info
 ```
 
-Expected endpoint:
+Typical endpoints:
 
 ```text
 unix:///var/run/docker.sock
+unix:///run/user/<uid>/docker.sock
 ```
 
 ### 2. Storage Location
@@ -78,10 +80,11 @@ If pulls or builds consume the wrong disk, check:
 docker info --format '{{.DockerRootDir}}'
 ```
 
-Expected root on this machine:
+Common values:
 
 ```text
 /var/lib/docker
+/run/user/<uid>/docker
 ```
 
 ### 3. Docker Socket Access Inside Containers
@@ -92,18 +95,50 @@ nested daemon.
 What must be true:
 
 - Docker CLI exists inside the container
-- the host socket is mounted, usually `/var/run/docker.sock`
-- the container user receives the socket gid through `group_add`
+- the host socket is mounted, usually `/var/run/docker.sock` or a rootless socket such as `/run/user/<uid>/docker.sock`
+- rootful sockets use `group_add` for the socket gid; rootless sockets use the dedicated rootless override and bind the resolved socket to `/var/run/docker.sock`
 
 Useful host checks:
 
 ```bash
-ls -l /var/run/docker.sock
-getent group docker
-stat -c '%g' /var/run/docker.sock
+./compose.sh doctor
 ```
 
-### 4. Driver Branch Must Match the Host
+If you are checking manually, inspect the resolved socket path instead of
+assuming `/var/run/docker.sock`.
+
+### 4. Rootless UID/GID Fallback
+
+Rootless Docker can only map container ids that fit inside the caller's
+subuid/subgid allocation. If your host uid/gid are larger than that range,
+image builds that `chown` files to the host identity will fail with `Invalid
+argument`.
+
+`compose.sh` now checks that condition automatically. When needed, it keeps the
+container username but falls back to `uid=0,gid=0` so builds and bind-mounted
+workspaces still function under rootless Docker.
+
+Verify what was selected:
+
+```bash
+./compose.sh doctor
+```
+
+### 5. Host-Side Process Ownership
+
+If the active engine is rootless Docker, host-side process ownership already
+tracks the host user running that daemon. That is what controls what you see in
+host `ps` and host `nvidia-smi`; the username inside the container does not
+change that.
+
+Useful checks:
+
+```bash
+ps -eo user,pid,ppid,comm,args | grep -E '(rootlesskit|dockerd|containerd-shim)' | grep -v grep
+nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory --format=csv,noheader
+```
+
+### 6. Driver Branch Must Match the Host
 
 If the host has NVIDIA driver support and you want the userspace packages inside
 the image, `NVIDIA_DRIVER_BRANCH` must match the host driver major branch.
@@ -120,14 +155,27 @@ Examples:
 - `570.x` -> `NVIDIA_DRIVER_BRANCH=570`
 - `590.48.01` -> `NVIDIA_DRIVER_BRANCH=590`
 
-### 5. `nvidia-smi` and CUDA Device Count Can Differ
+### 7. Nsight Compute
+
+The main image includes `ncu`. On hosts where the NVIDIA driver exposes
+performance counters to containers, you can profile kernels from inside
+`cuda-env` without installing `ncu` on the host.
+
+Useful checks:
+
+```bash
+docker exec cuda-env-dev /usr/bin/zsh -lc 'ncu --version'
+docker exec cuda-env-dev /usr/bin/zsh -lc 'nvcc --version'
+```
+
+### 8. `nvidia-smi` and CUDA Device Count Can Differ
 
 `nvidia-smi` reports physical GPUs. CUDA runtime may report fewer devices if a
 GPU is in a different mode, for example partial MIG usage.
 
 Do not assume that mismatch always means the container is broken.
 
-### 6. Long-Running Process Choice
+### 9. Long-Running Process Choice
 
 Both images intentionally keep a simple long-running foreground process:
 
@@ -135,8 +183,8 @@ Both images intentionally keep a simple long-running foreground process:
 sudo /usr/sbin/sshd -D -e
 ```
 
-That keeps the default user mapped to the host identity while still letting the
-container expose SSH on port `22`.
+That keeps the container lifecycle simple while still letting the image expose
+SSH on port `22`.
 
 ## Useful Checks
 
@@ -156,6 +204,12 @@ Verify container status:
 
 ```bash
 ./compose.sh ps
+```
+
+Inspect resolved Docker endpoint, socket mount, and container identity:
+
+```bash
+./compose.sh doctor
 ```
 
 Verify SSH is listening:
