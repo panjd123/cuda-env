@@ -33,6 +33,7 @@ services:
       CUDA_HOME: /usr/local/cuda
       HF_HOME: /home/${LOCAL_USER:-devuser}/.cache/huggingface
     volumes:
+      - ${CUDA_ENV_WORKSPACE_DIR}:/workspace
       - .:/workspace/cuda-env
       - ${CUDA_ENV_HF_CACHE_DIR}:/home/${LOCAL_USER:-devuser}/.cache/huggingface
     ports:

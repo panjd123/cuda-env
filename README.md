@@ -40,8 +40,9 @@ Enter it:
 docker exec -it cuda-env-dev /usr/bin/zsh
 ```
 
-The repo is mounted at `/workspace/cuda-env`, so `/workspace` itself stays
-available as a broader persistent workspace root.
+The repo is mounted at `/workspace/cuda-env`. `/workspace` itself is a separate
+persistent workspace root, backed by `CUDA_ENV_WORKSPACE_DIR` and defaulting to
+`.cuda-env-state/workspace` under the repo.
 
 SSH into it:
 
@@ -171,6 +172,9 @@ Useful checks:
 ./compose.sh doctor
 docker exec cuda-env-dev /usr/bin/zsh -lc 'ncu --version'
 ```
+
+The doctor output also shows `host_workspace_dir`, which is the host directory
+mounted at `/workspace`.
 
 ## Docker Lite
 

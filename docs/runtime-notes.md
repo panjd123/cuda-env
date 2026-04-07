@@ -7,6 +7,7 @@ for debugging, migration, and host-specific setup validation.
 
 - `compose.sh` prefers `~/.local/bin/docker` when it exists.
 - `compose.sh` resolves the active Docker endpoint from `DOCKER_HOST` or the current Docker context, so both rootful and rootless Unix sockets work.
+- `compose.sh` provisions a persistent host workspace directory for `/workspace`, defaulting to `.cuda-env-state/workspace` in the repo unless `CUDA_ENV_WORKSPACE_DIR` overrides it.
 - `CUDA_ENV_USE_PROXY=1` is the single switch for proxy-aware behavior:
   - build uses host networking
   - build and runtime both receive the host proxy environment
@@ -15,7 +16,7 @@ for debugging, migration, and host-specific setup validation.
 - On rootless Docker, `compose.sh` can automatically fall back to `uid=0,gid=0` for the container user when the host uid/gid are outside the mapped subuid/subgid range.
 - `compose.sh` auto-detects `NVIDIA_DRIVER_BRANCH` from the host driver version unless you set it explicitly.
 - Both images default to running `sshd` in the foreground from their Dockerfiles.
-- The repo bind mount lives at `/workspace/cuda-env`; `/workspace` is kept as a parent workspace directory instead of being replaced by the repo root.
+- The repo bind mount lives at `/workspace/cuda-env`; `/workspace` itself is a separate persistent workspace root.
 - Host port `22847` maps to `cuda-env:22`.
 - Host port `22848` maps to `docker-lite:22`.
 - The default interactive shell is `zsh`, with `oh-my-zsh`, `zsh-autosuggestions`, and `zsh-syntax-highlighting`.
@@ -212,6 +213,9 @@ Inspect resolved Docker endpoint, socket mount, and container identity:
 ```bash
 ./compose.sh doctor
 ```
+
+That output also includes `host_workspace_dir`, the host path mounted at
+`/workspace`.
 
 Verify SSH is listening:
 

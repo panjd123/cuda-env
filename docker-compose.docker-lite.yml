@@ -23,6 +23,7 @@ services:
     stdin_open: true
     restart: unless-stopped
     volumes:
+      - ${CUDA_ENV_WORKSPACE_DIR}:/workspace
       - .:/workspace/cuda-env
     ports:
       - "22848:22"

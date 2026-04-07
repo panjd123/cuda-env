@@ -63,6 +63,26 @@ resolve_hf_cache_dir() {
   printf '%s' "${fallback_dir}"
 }
 
+resolve_workspace_dir() {
+  local explicit_dir="${CUDA_ENV_WORKSPACE_DIR:-}"
+  local default_dir="${PWD}/.cuda-env-state/workspace"
+
+  if [[ -n "${explicit_dir}" ]]; then
+    if ! ensure_directory "${explicit_dir}"; then
+      echo "compose.sh: CUDA_ENV_WORKSPACE_DIR=${explicit_dir} is not usable; failed to create the directory." >&2
+      exit 1
+    fi
+    printf '%s' "${explicit_dir}"
+    return
+  fi
+
+  if ! ensure_directory "${default_dir}"; then
+    echo "compose.sh: failed to create workspace directory ${default_dir}." >&2
+    exit 1
+  fi
+  printf '%s' "${default_dir}"
+}
+
 print_help() {
   printf '%s\n' \
     'Usage:' \
@@ -113,6 +133,7 @@ print_help() {
     '  DEV_SECRETS_PASSPHRASE=...    Required for secrets-seal / secrets-unseal, and encrypted build import' \
     '  DOCKER_SOCKET_PATH=...        Override the Docker socket path to mount' \
     '  DOCKER_SOCKET_GID=...         Override the Docker socket group id inside compose' \
+    '  CUDA_ENV_WORKSPACE_DIR=...    Override the host directory mounted at /workspace' \
     '  CUDA_ENV_HF_CACHE_DIR=...     Override the host Hugging Face cache directory mount' \
     '' \
     'Notes:' \
@@ -425,6 +446,7 @@ print_doctor() {
   local fallback_active="${CUDA_ENV_ROOTLESS_FALLBACK_ACTIVE:-0}"
   local docker_rootless="no"
   local hf_cache_dir=""
+  local workspace_dir=""
 
   docker_context="$("${DOCKER_BIN}" context show 2>/dev/null || true)"
   docker_host="$(docker_context_host)"
@@ -433,6 +455,7 @@ print_doctor() {
   subuid_length="$(lookup_subid_length /etc/subuid "$(id -un)")"
   subgid_length="$(lookup_subid_length /etc/subgid "$(id -un)")"
   hf_cache_dir="$(resolve_hf_cache_dir)"
+  workspace_dir="$(resolve_workspace_dir)"
   if docker_is_rootless; then
     docker_rootless="yes"
   fi
@@ -454,6 +477,7 @@ print_doctor() {
     "container_uid=${LOCAL_UID}" \
     "container_gid=${LOCAL_GID}" \
     "rootless_uid_fallback_active=$([[ "${fallback_active}" == "1" ]] && printf yes || printf no)" \
+    "host_workspace_dir=${workspace_dir}" \
     "host_hf_cache_dir=${hf_cache_dir}" \
     "nvidia_driver_branch=${NVIDIA_DRIVER_BRANCH:-unknown}"
 }
@@ -466,6 +490,7 @@ detect_nvidia_driver_branch
 detect_docker_socket
 maybe_enable_rootless_identity_fallback
 export CUDA_ENV_HF_CACHE_DIR="$(resolve_hf_cache_dir)"
+export CUDA_ENV_WORKSPACE_DIR="$(resolve_workspace_dir)"
 if [[ "${ARGS[0]:-}" == "doctor" ]]; then
   print_doctor
   exit 0
