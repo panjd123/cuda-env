@@ -15,7 +15,7 @@ services:
         NVIDIA_DRIVER_BRANCH: ${NVIDIA_DRIVER_BRANCH:-}
     image: panjd123/cuda-env:${CUDA_VERSION:-13.2.0}
     container_name: ${COMPOSE_PROJECT_NAME:-cuda-env}-dev
-    working_dir: /workspace
+    working_dir: /workspace/cuda-env
     tty: true
     stdin_open: true
     restart: unless-stopped
@@ -33,7 +33,7 @@ services:
       CUDA_HOME: /usr/local/cuda
       HF_HOME: /home/${LOCAL_USER:-devuser}/.cache/huggingface
     volumes:
-      - .:/workspace
+      - .:/workspace/cuda-env
       - ${CUDA_ENV_HF_CACHE_DIR}:/home/${LOCAL_USER:-devuser}/.cache/huggingface
     ports:
       - "22847:22"

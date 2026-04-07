@@ -18,11 +18,11 @@ services:
         no_proxy: ${no_proxy:-}
     image: panjd123/docker-lite:${NODE_VERSION:-24.14.1}
     container_name: docker-lite-dev
-    working_dir: /workspace
+    working_dir: /workspace/cuda-env
     tty: true
     stdin_open: true
     restart: unless-stopped
     volumes:
-      - .:/workspace
+      - .:/workspace/cuda-env
     ports:
       - "22848:22"

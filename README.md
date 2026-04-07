@@ -40,6 +40,9 @@ Enter it:
 docker exec -it cuda-env-dev /usr/bin/zsh
 ```
 
+The repo is mounted at `/workspace/cuda-env`, so `/workspace` itself stays
+available as a broader persistent workspace root.
+
 SSH into it:
 
 ```bash

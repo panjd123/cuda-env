@@ -15,6 +15,7 @@ for debugging, migration, and host-specific setup validation.
 - On rootless Docker, `compose.sh` can automatically fall back to `uid=0,gid=0` for the container user when the host uid/gid are outside the mapped subuid/subgid range.
 - `compose.sh` auto-detects `NVIDIA_DRIVER_BRANCH` from the host driver version unless you set it explicitly.
 - Both images default to running `sshd` in the foreground from their Dockerfiles.
+- The repo bind mount lives at `/workspace/cuda-env`; `/workspace` is kept as a parent workspace directory instead of being replaced by the repo root.
 - Host port `22847` maps to `cuda-env:22`.
 - Host port `22848` maps to `docker-lite:22`.
 - The default interactive shell is `zsh`, with `oh-my-zsh`, `zsh-autosuggestions`, and `zsh-syntax-highlighting`.
