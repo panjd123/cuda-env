@@ -108,7 +108,7 @@ Start the container:
 Enter the container:
 
 ```bash
-docker exec -it cuda-env-dev /bin/bash
+docker exec -it cuda-env-dev /usr/bin/zsh
 ```
 
 SSH into the container from the host:
@@ -140,6 +140,7 @@ Stop and remove the container:
 - The container is configured with `restart: unless-stopped`.
 - The container now stays alive by running `sshd` in the foreground.
 - Host port `22847` is mapped to container port `22`.
+- The default interactive shell inside the container is now `zsh`, with `oh-my-zsh` preinstalled for the development user.
 - The container's default user remains the current host user (`cc` on this machine). `sshd` itself is started through `sudo`, so SSH can still bind to port `22` without changing the container's default user to root.
 
 ## GPU Notes

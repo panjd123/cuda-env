@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     file \
     less \
+    zsh \
     neovim \
     vim \
     nano \
@@ -134,12 +135,12 @@ RUN if ! getent group "${LOCAL_GID}" >/dev/null; then \
         groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
     fi && \
     if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
-        usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /bin/bash "${LOCAL_USER}"; \
+        usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
     elif getent passwd "${LOCAL_UID}" >/dev/null; then \
         EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
-        usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /bin/bash "${EXISTING_USER}"; \
+        usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
     else \
-        useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /bin/bash "${LOCAL_USER}"; \
+        useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
     fi && \
     usermod -aG sudo "${LOCAL_USER}" && \
     echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
@@ -169,6 +170,7 @@ ENV LOCAL_USER=${LOCAL_USER} \
     GIT_EMAIL=${GIT_EMAIL} \
     DOTFILE_REPO_URL=${DOTFILE_REPO_URL} \
     CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
+    SHELL=/usr/bin/zsh \
     NVM_DIR=/home/${LOCAL_USER}/.nvm \
     CARGO_HOME=/home/${LOCAL_USER}/.cargo \
     RUSTUP_HOME=/home/${LOCAL_USER}/.rustup \
@@ -204,6 +206,16 @@ RUN mkdir -p \
     echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"' >> "${BASH_ENV}" && \
     echo '[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"' >> "${BASH_ENV}" && \
     echo '. "$BASH_ENV"' >> "/home/${LOCAL_USER}/.bashrc" && \
+    printf '%s\n' \
+        'export ZSH="$HOME/.oh-my-zsh"' \
+        'ZSH_THEME="robbyrussell"' \
+        'plugins=(git)' \
+        '' \
+        '[ -f "$HOME/.bash_env" ] && source "$HOME/.bash_env"' \
+        '[ -f "$HOME/.dotfile/bashrc_common.sh" ] && source "$HOME/.dotfile/bashrc_common.sh"' \
+        '[ -f "$ZSH/oh-my-zsh.sh" ] && source "$ZSH/oh-my-zsh.sh"' \
+        > "/home/${LOCAL_USER}/.zshrc" && \
+    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.zshrc" && \
     chown -R "${LOCAL_UID}:${LOCAL_GID}" \
     "/home/${LOCAL_USER}/.local" \
     "${NVM_DIR}" \
@@ -232,6 +244,13 @@ RUN git clone "${DOTFILE_REPO_URL}" "${HOME}/.dotfile" && \
     fi && \
     if ! grep -qF 'source "$HOME/.dotfile/bashrc_common.sh"' "${BASH_ENV}"; then \
         printf '\nsource "$HOME/.dotfile/bashrc_common.sh"\n' >> "${BASH_ENV}"; \
+    fi
+
+# Install and wire up Oh My Zsh without changing shell interactively.
+RUN RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" && \
+    if ! grep -qF 'source "$HOME/.dotfile/bashrc_common.sh"' "${HOME}/.zshrc"; then \
+        printf '\n[ -f "$HOME/.dotfile/bashrc_common.sh" ] && source "$HOME/.dotfile/bashrc_common.sh"\n' >> "${HOME}/.zshrc"; \
     fi
 
 # Node runtime via nvm.
@@ -283,4 +302,4 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
 
 EXPOSE 22
 
-CMD ["/bin/bash"]
+CMD ["/usr/bin/zsh"]
