@@ -48,7 +48,36 @@ If you plan to use `cuda-env`, also verify:
 command -v nvidia-smi && nvidia-smi
 ```
 
-## 3. Secrets Behavior
+## 3. Pre-pull the Base Image First
+
+Before starting a full build, pull the base image explicitly and watch the
+download speed.
+
+For `docker-lite`:
+
+```bash
+docker pull ubuntu:24.04
+```
+
+For `cuda-env`:
+
+```bash
+docker pull nvidia/cuda:13.2.0-cudnn-devel-ubuntu24.04
+```
+
+If the observed pull speed is very slow, especially below `1 MB/s` for a
+sustained period, do not blindly continue into `./compose.sh build`.
+
+Instead:
+
+- stop and report the slow pull speed to the user
+- explain that the build is likely to be slow or unstable for the same reason
+- discuss mitigation first, such as proxy configuration, Docker registry mirror,
+  LAN proxy reachability, or another network path
+
+Only continue with the full build after that check is acceptable.
+
+## 4. Secrets Behavior
 
 Build-time secrets resolve in this order:
 
@@ -70,7 +99,7 @@ Possible imported targets include:
 - GitHub CLI authenticated state
 - `~/.cache/huggingface/token`
 
-## 4. Install `docker-lite`
+## 5. Install `docker-lite`
 
 Use this on a fresh machine unless you know you need CUDA immediately.
 
@@ -90,7 +119,7 @@ CUDA_ENV_USE_PROXY=1 ./compose.sh lite build
 ./compose.sh lite exec docker-lite /usr/bin/zsh
 ```
 
-## 5. Install `cuda-env`
+## 6. Install `cuda-env`
 
 Only do this on a host with usable NVIDIA support.
 
@@ -110,7 +139,7 @@ CUDA_ENV_USE_PROXY=1 ./compose.sh build
 ./compose.sh exec cuda-dev /usr/bin/zsh
 ```
 
-## 6. Verify the Installation
+## 7. Verify the Installation
 
 For `docker-lite`:
 
@@ -130,11 +159,12 @@ For `cuda-env`, add:
 ./compose.sh exec cuda-dev /usr/bin/zsh -lc 'nvcc --version'
 ```
 
-## 7. Common Failure Modes
+## 8. Common Failure Modes
 
 Check these first:
 
 - the build needed proxy but `CUDA_ENV_USE_PROXY=1` was not set
+- the base image pull was already too slow, but the build was started anyway
 - only encrypted secrets were present, but `DEV_SECRETS_PASSPHRASE` was not set
 - the host Docker socket is missing or inaccessible
 - `cuda-env` was chosen on a host without usable NVIDIA support
