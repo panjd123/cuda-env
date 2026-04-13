@@ -9,6 +9,8 @@ for debugging, migration, and host-specific setup validation.
 - `compose.sh` resolves the active Docker endpoint from `DOCKER_HOST` or the current Docker context, so both rootful and rootless Unix sockets work.
 - `compose.sh` provisions a persistent host workspace directory for `/workspace`, defaulting to `.cuda-env-state/workspace` in the repo unless `CUDA_ENV_WORKSPACE_DIR` overrides it.
 - Build always uses host networking.
+- `CUDA_ENV_BUILD_MODE=full` builds both template and final stages locally.
+- `CUDA_ENV_BUILD_MODE=template` pulls the published template image first and only builds the final local stage.
 - `CUDA_ENV_USE_PROXY=1` is the single switch for proxy-aware behavior:
   - build and runtime both receive the host proxy environment
 - When the active Docker endpoint resolves to a Unix socket and `CUDA_ENV_USE_DOCKER_SOCKET` is not set to `0`, `compose.sh` automatically adds the target-specific socket override so either image can talk to the host Docker engine.
@@ -16,6 +18,7 @@ for debugging, migration, and host-specific setup validation.
 - runtime always keeps bridge networking
 - `host.docker.internal` is always mapped to the host gateway, even when proxy support is disabled
 - `compose.sh` auto-detects `NVIDIA_DRIVER_BRANCH` from the host driver version unless you set it explicitly.
+- Published `*-template` images do not include imported `.dev-secrets/*` content.
 - Both images default to running `sshd` in the foreground from their Dockerfiles.
 - The repo bind mount lives at `/workspace/cuda-env`; `/workspace` itself is a separate persistent workspace root.
 - Host port `22847` maps to `cuda-env:22`.
@@ -26,7 +29,7 @@ for debugging, migration, and host-specific setup validation.
 
 - The main image uses CUDA 13.2 as the base and also installs CUDA 12.8 and 13.0 side by side.
 - `/usr/local/cuda` currently defaults to CUDA 12.8 through `update-alternatives`.
-- The image also installs host-matched NVIDIA userspace packages:
+- The final local `cuda-env` image installs host-matched NVIDIA userspace packages:
 
 ```text
 libnvidia-compute-${NVIDIA_DRIVER_BRANCH}

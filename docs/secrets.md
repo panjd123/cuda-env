@@ -3,6 +3,10 @@
 This repo keeps plaintext secrets out of git while still allowing optional
 build-time import into the images.
 
+Published template images are intentionally secret-free. Secret import only
+happens in the final local image build stage, not in the reusable template
+images that may be pushed to a registry.
+
 ## Layout
 
 Local plaintext secrets live under:
@@ -69,6 +73,9 @@ During `./compose.sh build`, secrets are resolved in this order:
 1. If local plaintext `.dev-secrets/` exists, use it directly.
 2. Otherwise, if `.dev-secrets.encrypted/bundle.tar.gz.enc` exists, decrypt it on the host.
 3. Otherwise, continue the build without importing any secrets.
+
+That imported archive is only consumed by the final local image stage. The
+template stage never unpacks `.dev-secrets/*`.
 
 ## Important Notes
 

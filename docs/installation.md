@@ -9,8 +9,38 @@ the environment is usable.
 For secret details, read `docs/secrets.md`.
 For runtime debugging, read `docs/runtime-notes.md`.
 
+If the repo is not present locally yet, clone:
+
+```bash
+git clone https://github.com/panjd123/cuda-env.git
+cd cuda-env
+```
+
 Build always uses host networking. `CUDA_ENV_USE_PROXY=1` only controls whether
 host proxy variables are injected into build and runtime.
+
+Image tags use a repo-owned version plus an optional CUDA suffix:
+
+- `cuda-env`: `${CUDA_ENV_IMAGE_VERSION}-cuda${CUDA_VERSION}`
+- `docker-lite`: `${CUDA_ENV_IMAGE_VERSION}`
+- `cuda-env-template`: `${CUDA_ENV_IMAGE_VERSION}-cuda${CUDA_VERSION}`
+- `docker-lite-template`: `${CUDA_ENV_IMAGE_VERSION}`
+
+Build modes:
+
+- `CUDA_ENV_BUILD_MODE=full`: build the template and final stages locally
+- `CUDA_ENV_BUILD_MODE=template`: pull the published template image first, then build only the final local stage
+
+## 0. AI Interaction Rules
+
+If you are an AI agent following this document, use these rules:
+
+- If the user has not specified whether they want `docker-lite` or `cuda-env`, ask before building anything.
+- If the host does not appear to support NVIDIA and the user did not explicitly ask for `cuda-env`, recommend `docker-lite`.
+- If build-time secret import may be needed and only `.dev-secrets.encrypted/bundle.tar.gz.enc` is available, ask the user for `DEV_SECRETS_PASSPHRASE` before building.
+- If neither plaintext secrets nor encrypted secrets are present, continue without secrets and do not ask for a passphrase.
+- If base-image pull speed is very slow, especially below `1 MB/s` for a sustained period, stop and report that to the user before continuing.
+- Do not use `README.md` as the installation manual; this file is the source of truth.
 
 ## 1. Choose a Target
 
@@ -46,6 +76,18 @@ If you plan to use `cuda-env`, also verify:
 
 ```bash
 command -v nvidia-smi && nvidia-smi
+```
+
+Optional version override:
+
+```bash
+export CUDA_ENV_IMAGE_VERSION=v2
+```
+
+Optional build mode override:
+
+```bash
+export CUDA_ENV_BUILD_MODE=template
 ```
 
 ## 3. Pre-pull the Base Image First
@@ -85,6 +127,12 @@ Build-time secrets resolve in this order:
 2. `.dev-secrets.encrypted/bundle.tar.gz.enc`
 3. no secret import
 
+Decision rules:
+
+- If `.dev-secrets/` exists locally, use it directly and do not ask for a passphrase.
+- If `.dev-secrets/` does not exist but `.dev-secrets.encrypted/bundle.tar.gz.enc` exists, ask the user for `DEV_SECRETS_PASSPHRASE` unless they already provided it.
+- If neither exists, continue without secrets.
+
 If only the encrypted bundle exists locally:
 
 ```bash
@@ -119,6 +167,14 @@ CUDA_ENV_USE_PROXY=1 ./compose.sh lite build
 ./compose.sh lite exec docker-lite /usr/bin/zsh
 ```
 
+With a pulled published template:
+
+```bash
+CUDA_ENV_BUILD_MODE=template ./compose.sh lite build
+CUDA_ENV_BUILD_MODE=template ./compose.sh lite up -d
+CUDA_ENV_BUILD_MODE=template ./compose.sh lite exec docker-lite /usr/bin/zsh
+```
+
 ## 6. Install `cuda-env`
 
 Only do this on a host with usable NVIDIA support.
@@ -137,6 +193,14 @@ With proxy:
 CUDA_ENV_USE_PROXY=1 ./compose.sh build
 ./compose.sh up -d
 ./compose.sh exec cuda-dev /usr/bin/zsh
+```
+
+With a pulled published template:
+
+```bash
+CUDA_ENV_BUILD_MODE=template ./compose.sh build
+CUDA_ENV_BUILD_MODE=template ./compose.sh up -d
+CUDA_ENV_BUILD_MODE=template ./compose.sh exec cuda-dev /usr/bin/zsh
 ```
 
 ## 7. Verify the Installation

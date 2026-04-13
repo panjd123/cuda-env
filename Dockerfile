@@ -1,16 +1,8 @@
 ARG CUDA_VERSION=13.2.0
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu24.04
+ARG CUDA_ENV_TEMPLATE_SOURCE=cuda-env-template
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu24.04 AS cuda-env-template
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG LOCAL_USER=devuser
-ARG LOCAL_UID=1000
-ARG LOCAL_GID=1000
-ARG GIT_USER=panjd123
-ARG GIT_EMAIL=xm_jarden@qq.com
-ARG DOTFILE_REPO_URL=https://github.com/panjd123/dotfile.git
-ARG NVM_VERSION=v0.40.4
-ARG NODE_VERSION=24.14.1
-ARG DEV_SECRETS_ARCHIVE_B64
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
@@ -127,18 +119,6 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
     docker-buildx-plugin \
     docker-compose-plugin
 
-# Install the host-matched NVIDIA userspace tools so containers get nvidia-smi
-# and the driver-side CUDA libraries needed by the runtime.
-ARG NVIDIA_DRIVER_BRANCH
-RUN if [[ -n "${NVIDIA_DRIVER_BRANCH:-}" ]]; then \
-        apt-get install -y --no-install-recommends \
-        libnvidia-compute-${NVIDIA_DRIVER_BRANCH} \
-        nvidia-compute-utils-${NVIDIA_DRIVER_BRANCH} \
-        nvidia-utils-${NVIDIA_DRIVER_BRANCH}; \
-    else \
-        echo "Skipping NVIDIA userspace package install because NVIDIA_DRIVER_BRANCH is empty."; \
-    fi
-
 # System-level initialization.
 RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
     echo "${TZ}" > /etc/timezone && \
@@ -147,73 +127,43 @@ RUN ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime && \
     git lfs install --system && \
     mkdir -p /var/run/sshd
 
-# Create the container user to match the host identity.
-RUN if [[ "${LOCAL_UID}" == "0" && "${LOCAL_GID}" == "0" && "${LOCAL_USER}" != "root" ]]; then \
-        if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
-            usermod --non-unique --uid 0 --gid 0 --home "/home/${LOCAL_USER}" --move-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
-        else \
-            useradd --non-unique --uid 0 --gid 0 --create-home --home-dir "/home/${LOCAL_USER}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
-        fi; \
-    else \
-        if ! getent group "${LOCAL_GID}" >/dev/null; then \
-            groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
-        fi; \
-        if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
-            usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
-        elif getent passwd "${LOCAL_UID}" >/dev/null; then \
-            EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
-            usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
-        else \
-            useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
-        fi; \
-    fi && \
-    usermod -aG sudo "${LOCAL_USER}" && \
-    echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
-    chmod 0440 "/etc/sudoers.d/${LOCAL_USER}" && \
-    mkdir -p /workspace "/home/${LOCAL_USER}/.ssh" && \
-    chmod 0700 "/home/${LOCAL_USER}/.ssh" && \
-    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh" && \
-    chown "${LOCAL_UID}:${LOCAL_GID}" /workspace
-
-# Minimal sshd hardening for key-based access to the development user.
-RUN mkdir -p "/etc/ssh/sshd_config.d" && \
-    permit_root_login="no" && \
-    if [[ "${LOCAL_UID}" == "0" ]]; then \
-        permit_root_login="prohibit-password"; \
-    fi && \
-    printf '%s\n' \
-        "PubkeyAuthentication yes" \
-        "PasswordAuthentication no" \
-        "KbdInteractiveAuthentication no" \
-        "PermitRootLogin ${permit_root_login}" \
-        "AllowUsers ${LOCAL_USER}" \
-        "AuthorizedKeysFile .ssh/authorized_keys" \
-        > "/etc/ssh/sshd_config.d/10-cuda-env.conf"
-
 # Keep apt indexes around while package installation is still ongoing, then
 # clean them once at the end so intermediate layers can reuse the metadata.
 RUN rm -rf /var/lib/apt/lists/*
 
-ENV LOCAL_USER=${LOCAL_USER} \
-    GIT_USER=${GIT_USER} \
-    GIT_EMAIL=${GIT_EMAIL} \
-    DOTFILE_REPO_URL=${DOTFILE_REPO_URL} \
-    HOME=/home/${LOCAL_USER} \
+ARG DOTFILE_REPO_URL=https://github.com/panjd123/dotfile.git
+ARG NVM_VERSION=v0.40.4
+ARG NODE_VERSION=24.14.1
+ARG ZELLIJ_VERSION=v0.44.0
+ARG CARGO_BUILD_JOBS=32
+
+ENV HOME=/home/devuser \
     SHELL=/usr/bin/zsh \
-    DEV_SHELL_ENV=/home/${LOCAL_USER}/.shell_env \
-    NVM_DIR=/home/${LOCAL_USER}/.nvm \
-    CARGO_HOME=/home/${LOCAL_USER}/.cargo \
-    RUSTUP_HOME=/home/${LOCAL_USER}/.rustup \
+    DEV_SHELL_ENV=/home/devuser/.shell_env \
+    NVM_DIR=/home/devuser/.nvm \
+    CARGO_HOME=/home/devuser/.cargo \
+    RUSTUP_HOME=/home/devuser/.rustup \
     UV_NO_MODIFY_PATH=1 \
-    BASH_ENV=/home/${LOCAL_USER}/.shell_env \
+    BASH_ENV=/home/devuser/.shell_env \
     NVM_SYMLINK_CURRENT=true \
-    PATH=/home/${LOCAL_USER}/.local/bin:/home/${LOCAL_USER}/.cargo/bin:/home/${LOCAL_USER}/.nvm/current/bin:/usr/local/cuda/bin:${PATH} \
+    PATH=/home/devuser/.local/bin:/home/devuser/.cargo/bin:/home/devuser/.nvm/current/bin:/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH}
 
-USER ${LOCAL_USER}
+RUN if ! getent group 20000 >/dev/null; then \
+        groupadd --gid 20000 devuser; \
+    fi && \
+    if ! id -u devuser >/dev/null 2>&1; then \
+        useradd --uid 20000 --gid 20000 --create-home --shell /usr/bin/zsh devuser; \
+    fi && \
+    mkdir -p /workspace /home/devuser/.ssh && \
+    chown -R 20000:20000 /workspace /home/devuser && \
+    chmod 0700 /home/devuser/.ssh
+
+USER devuser
 WORKDIR /workspace
 
-# User shell bootstrap and reusable environment wiring shared by bash and zsh.
+# Build a reusable user-home template once, then copy it into the final
+# user-specific stage.
 RUN mkdir -p \
     "$HOME/.local/bin" \
     "${NVM_DIR}" \
@@ -263,20 +213,12 @@ RUN mkdir -p \
         '[ -f "$ZSH/oh-my-zsh.sh" ] && source "$ZSH/oh-my-zsh.sh"' \
         > "$HOME/.zshrc"
 
-# User-level Git defaults.
-RUN git config --global user.name "${GIT_USER}" && \
-    git config --global user.email "${GIT_EMAIL}" && \
-    git config --global init.defaultBranch main && \
-    git config --global core.editor nano && \
-    git config --global pull.rebase false
-
-# Personal shell dotfiles. Reuse the repo's non-interactive install entrypoint
-# while keeping sshd managed by this image and letting dotfile manage
-# authorized_keys.
 RUN git clone "${DOTFILE_REPO_URL}" "${HOME}/.dotfile" && \
-    bash "${HOME}/.dotfile/bashrc_common.sh" install -y --ssh-keys=apply --sshd=skip
+    bash "${HOME}/.dotfile/bashrc_common.sh" install -y --ssh-keys=apply --sshd=skip && \
+    sed -i \
+        's|^source /home/devuser/.dotfile/bashrc_common.sh$|source "$HOME/.dotfile/bashrc_common.sh"|' \
+        "$HOME/.bashrc" "$HOME/.zshrc"
 
-# Install and wire up Oh My Zsh without changing shell interactively.
 RUN RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" && \
     git clone https://github.com/zsh-users/zsh-autosuggestions "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions" && \
@@ -299,8 +241,6 @@ RUN curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/inst
     rm -f "${tmp_bash_env}"
 
 # Rust toolchain and source-built TUI tools.
-ARG ZELLIJ_VERSION=v0.44.0
-ARG CARGO_BUILD_JOBS=32
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
     . "${CARGO_HOME}/env" && \
     cargo install --jobs "${CARGO_BUILD_JOBS}" --locked --version "${ZELLIJ_VERSION#v}" zellij && \
@@ -315,11 +255,116 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 
 # Claude Code official installer.
 RUN source "${BASH_ENV}" && \
-    curl -fsSL https://claude.ai/install.sh | bash
+    curl -fsSL https://claude.ai/install.sh | bash && \
+    claude_target="$(readlink "$HOME/.local/bin/claude")" && \
+    claude_version="$(basename "$claude_target")" && \
+    ln -snf "../share/claude/versions/${claude_version}" "$HOME/.local/bin/claude"
 
-# Node-based CLI tools and optional host secrets import.
+# Generic Node-based CLI tools belong in the reusable template.
 RUN source "${BASH_ENV}" && \
-    npm install -g @openai/codex && \
+    npm install -g @openai/codex
+
+FROM ${CUDA_ENV_TEMPLATE_SOURCE}
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG LOCAL_USER=devuser
+ARG LOCAL_UID=1000
+ARG LOCAL_GID=1000
+ARG GIT_USER=panjd123
+ARG GIT_EMAIL=xm_jarden@qq.com
+ARG DEV_SECRETS_ARCHIVE_B64
+ARG NVIDIA_DRIVER_BRANCH
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
+RUN if [[ -n "${NVIDIA_DRIVER_BRANCH:-}" ]]; then \
+        apt-get update && \
+        apt-get install -y --no-install-recommends \
+        libnvidia-compute-${NVIDIA_DRIVER_BRANCH} \
+        nvidia-compute-utils-${NVIDIA_DRIVER_BRANCH} \
+        nvidia-utils-${NVIDIA_DRIVER_BRANCH}; \
+    else \
+        echo "Skipping NVIDIA userspace package install because NVIDIA_DRIVER_BRANCH is empty."; \
+    fi && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV LOCAL_USER=${LOCAL_USER} \
+    GIT_USER=${GIT_USER} \
+    GIT_EMAIL=${GIT_EMAIL} \
+    HOME=/home/${LOCAL_USER} \
+    SHELL=/usr/bin/zsh \
+    DEV_SHELL_ENV=/home/${LOCAL_USER}/.shell_env \
+    NVM_DIR=/home/${LOCAL_USER}/.nvm \
+    CARGO_HOME=/home/${LOCAL_USER}/.cargo \
+    RUSTUP_HOME=/home/${LOCAL_USER}/.rustup \
+    UV_NO_MODIFY_PATH=1 \
+    BASH_ENV=/home/${LOCAL_USER}/.shell_env \
+    NVM_SYMLINK_CURRENT=true \
+    PATH=/home/${LOCAL_USER}/.local/bin:/home/${LOCAL_USER}/.cargo/bin:/home/${LOCAL_USER}/.nvm/current/bin:/usr/local/cuda/bin:${PATH} \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH}
+
+USER root
+
+RUN if [[ "${LOCAL_UID}" == "0" && "${LOCAL_GID}" == "0" && "${LOCAL_USER}" != "root" ]]; then \
+        if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
+            usermod --non-unique --uid 0 --gid 0 --home "/home/${LOCAL_USER}" --move-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        else \
+            useradd --non-unique --uid 0 --gid 0 --create-home --home-dir "/home/${LOCAL_USER}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        fi; \
+    else \
+        if ! getent group "${LOCAL_GID}" >/dev/null; then \
+            groupadd --gid "${LOCAL_GID}" "${LOCAL_USER}"; \
+        fi; \
+        if id -u "${LOCAL_USER}" >/dev/null; then \
+            usermod --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        elif getent passwd "${LOCAL_UID}" >/dev/null; then \
+            EXISTING_USER="$(getent passwd "${LOCAL_UID}" | cut -d: -f1)" && \
+            usermod --login "${LOCAL_USER}" --home "/home/${LOCAL_USER}" --move-home --gid "${LOCAL_GID}" --shell /usr/bin/zsh "${EXISTING_USER}"; \
+        else \
+            useradd --uid "${LOCAL_UID}" --gid "${LOCAL_GID}" --create-home --shell /usr/bin/zsh "${LOCAL_USER}"; \
+        fi; \
+    fi && \
+    usermod -aG sudo "${LOCAL_USER}" && \
+    echo "${LOCAL_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${LOCAL_USER}" && \
+    chmod 0440 "/etc/sudoers.d/${LOCAL_USER}" && \
+    mkdir -p /workspace "/home/${LOCAL_USER}/.ssh" "/etc/ssh/sshd_config.d" && \
+    chmod 0700 "/home/${LOCAL_USER}/.ssh" && \
+    chown "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}/.ssh" && \
+    chown "${LOCAL_UID}:${LOCAL_GID}" /workspace
+
+RUN permit_root_login="no" && \
+    if [[ "${LOCAL_UID}" == "0" ]]; then \
+        permit_root_login="prohibit-password"; \
+    fi && \
+    printf '%s\n' \
+        "PubkeyAuthentication yes" \
+        "PasswordAuthentication no" \
+        "KbdInteractiveAuthentication no" \
+        "PermitRootLogin ${permit_root_login}" \
+        "AllowUsers ${LOCAL_USER}" \
+        "AuthorizedKeysFile .ssh/authorized_keys" \
+        > "/etc/ssh/sshd_config.d/10-cuda-env.conf"
+
+RUN cp -a /home/devuser/. "/home/${LOCAL_USER}/" && \
+    chown -R "${LOCAL_UID}:${LOCAL_GID}" "/home/${LOCAL_USER}" && \
+    chmod 0700 "/home/${LOCAL_USER}/.ssh" && \
+    find "/home/${LOCAL_USER}/.ssh" -type f -exec chmod 0600 {} +
+
+USER ${LOCAL_USER}
+WORKDIR /workspace
+
+# User-specific identity and secrets remain in the final stage.
+RUN git config --global user.name "${GIT_USER}" && \
+    git config --global user.email "${GIT_EMAIL}" && \
+    git config --global init.defaultBranch main && \
+    git config --global core.editor nano && \
+    git config --global pull.rebase false
+
+RUN source "${BASH_ENV}" && \
     if [[ -n "${DEV_SECRETS_ARCHIVE_B64:-}" ]]; then \
         tmpdir="$(mktemp -d)" && \
         printf '%s' "${DEV_SECRETS_ARCHIVE_B64}" | \

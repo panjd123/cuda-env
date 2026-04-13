@@ -15,7 +15,8 @@ services:
         CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-latest}
         DEV_SECRETS_ARCHIVE_B64: ${DEV_SECRETS_ARCHIVE_B64:-}
         NVIDIA_DRIVER_BRANCH: ${NVIDIA_DRIVER_BRANCH:-}
-    image: panjd123/cuda-env:${CUDA_VERSION:-13.2.0}
+        CUDA_ENV_TEMPLATE_SOURCE: ${CUDA_ENV_TEMPLATE_SOURCE:-cuda-env-template}
+    image: panjd123/cuda-env:${CUDA_ENV_IMAGE_VERSION:-v1}-cuda${CUDA_VERSION:-13.2.0}
     container_name: ${COMPOSE_PROJECT_NAME:-cuda-env}-dev
     working_dir: /workspace
     tty: true

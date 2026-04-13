@@ -19,6 +19,9 @@ LOCAL_GID_WAS_SET=0
 export LOCAL_USER="${LOCAL_USER:-$(id -un)}"
 export LOCAL_UID="${LOCAL_UID:-$(id -u)}"
 export LOCAL_GID="${LOCAL_GID:-$(id -g)}"
+export CUDA_VERSION="${CUDA_VERSION:-13.2.0}"
+export CUDA_ENV_IMAGE_VERSION="${CUDA_ENV_IMAGE_VERSION:-v1}"
+export CUDA_ENV_BUILD_MODE="${CUDA_ENV_BUILD_MODE:-full}"
 export BUILDAH_FORMAT="${BUILDAH_FORMAT:-docker}"
 
 DEV_SECRETS_DIR=".dev-secrets"
@@ -127,7 +130,10 @@ print_help() {
     '  Example: `./compose.sh build --help` shows help for `docker compose build`.' \
     '' \
     'Environment switches:' \
+    '  CUDA_ENV_BUILD_MODE=full      Build locally from the Dockerfile template stage' \
+    '  CUDA_ENV_BUILD_MODE=template  Pull the published template image first, then build only the final user stage locally' \
     '  CUDA_ENV_USE_PROXY=1          Enable proxy environment overrides' \
+    '  CUDA_ENV_IMAGE_VERSION=v1     Project image version used in image tags' \
     '  CUDA_ENV_USE_DOCKER_SOCKET=0  Disable automatic Docker socket override' \
     '  CUDA_ENV_ROOTLESS_UID_FALLBACK=0  Disable automatic uid/gid fallback for rootless Docker' \
     '  CARGO_BUILD_JOBS=32           Cap Rust build parallelism during image build' \
@@ -160,6 +166,31 @@ parse_target() {
   esac
 
   ARGS=("$@")
+}
+
+cuda_template_image_ref() {
+  printf 'panjd123/cuda-env-template:%s-cuda%s' "${CUDA_ENV_IMAGE_VERSION}" "${CUDA_VERSION}"
+}
+
+docker_lite_template_image_ref() {
+  printf 'panjd123/docker-lite-template:%s' "${CUDA_ENV_IMAGE_VERSION}"
+}
+
+resolve_template_sources() {
+  case "${CUDA_ENV_BUILD_MODE}" in
+    full)
+      export CUDA_ENV_TEMPLATE_SOURCE="${CUDA_ENV_TEMPLATE_SOURCE:-cuda-env-template}"
+      export DOCKER_LITE_TEMPLATE_SOURCE="${DOCKER_LITE_TEMPLATE_SOURCE:-docker-lite-template}"
+      ;;
+    template)
+      export CUDA_ENV_TEMPLATE_SOURCE="${CUDA_ENV_TEMPLATE_SOURCE:-$(cuda_template_image_ref)}"
+      export DOCKER_LITE_TEMPLATE_SOURCE="${DOCKER_LITE_TEMPLATE_SOURCE:-$(docker_lite_template_image_ref)}"
+      ;;
+    *)
+      echo "compose.sh: unsupported CUDA_ENV_BUILD_MODE=${CUDA_ENV_BUILD_MODE}; expected full or template." >&2
+      exit 1
+      ;;
+  esac
 }
 
 handle_help_command() {
@@ -403,6 +434,30 @@ should_prepare_dev_secrets_archive() {
   return 1
 }
 
+maybe_pull_remote_template() {
+  local template_image=""
+
+  if [[ "${CUDA_ENV_BUILD_MODE}" != "template" ]]; then
+    return
+  fi
+
+  if ! should_prepare_dev_secrets_archive "${ARGS[@]}"; then
+    return
+  fi
+
+  case "${COMPOSE_BASE_FILE}" in
+    docker-compose.docker-lite.yml)
+      template_image="${DOCKER_LITE_TEMPLATE_SOURCE}"
+      ;;
+    *)
+      template_image="${CUDA_ENV_TEMPLATE_SOURCE}"
+      ;;
+  esac
+
+  echo "compose.sh: pulling template image ${template_image}" >&2
+  "${DOCKER_BIN}" pull "${template_image}" >/dev/null
+}
+
 handle_dev_secrets_command() {
   case "${1:-}" in
     secrets-seal)
@@ -478,6 +533,10 @@ print_doctor() {
     "container_user=${LOCAL_USER}" \
     "container_uid=${LOCAL_UID}" \
     "container_gid=${LOCAL_GID}" \
+    "build_mode=${CUDA_ENV_BUILD_MODE}" \
+    "image_version=${CUDA_ENV_IMAGE_VERSION}" \
+    "cuda_template_source=${CUDA_ENV_TEMPLATE_SOURCE}" \
+    "docker_lite_template_source=${DOCKER_LITE_TEMPLATE_SOURCE}" \
     "rootless_uid_fallback_active=$([[ "${fallback_active}" == "1" ]] && printf yes || printf no)" \
     "host_workspace_dir=${workspace_dir}" \
     "host_hf_cache_dir=${hf_cache_dir}" \
@@ -485,6 +544,7 @@ print_doctor() {
 }
 
 parse_target "$@"
+resolve_template_sources
 
 handle_help_command "${ARGS[0]:-}"
 handle_dev_secrets_command "${ARGS[0]:-}"
@@ -500,6 +560,7 @@ fi
 if should_prepare_dev_secrets_archive "${ARGS[@]}"; then
   prepare_dev_secrets_archive
 fi
+maybe_pull_remote_template
 
 compose_files=("${COMPOSE_FILE:-${COMPOSE_BASE_FILE}}")
 

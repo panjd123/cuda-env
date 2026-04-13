@@ -10,7 +10,8 @@ services:
         LOCAL_GID: ${LOCAL_GID:-1000}
         NODE_VERSION: ${NODE_VERSION:-24.14.1}
         DEV_SECRETS_ARCHIVE_B64: ${DEV_SECRETS_ARCHIVE_B64:-}
-    image: panjd123/docker-lite:${NODE_VERSION:-24.14.1}
+        DOCKER_LITE_TEMPLATE_SOURCE: ${DOCKER_LITE_TEMPLATE_SOURCE:-docker-lite-template}
+    image: panjd123/docker-lite:${CUDA_ENV_IMAGE_VERSION:-v1}
     container_name: docker-lite-dev
     working_dir: /workspace
     tty: true
