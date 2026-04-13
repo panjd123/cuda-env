@@ -138,6 +138,7 @@ Check these first:
 - only encrypted secrets were present, but `DEV_SECRETS_PASSPHRASE` was not set
 - the host Docker socket is missing or inaccessible
 - `cuda-env` was chosen on a host without usable NVIDIA support
+- on very large hosts, Rust source builds may need capped parallelism; retry with `CARGO_BUILD_JOBS=32 ./compose.sh build`
 
 Useful commands:
 

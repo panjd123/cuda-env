@@ -94,6 +94,14 @@ Useful commands:
 ./compose.sh compose-help
 ```
 
+On very large hosts, Rust-based tools in the image can open too many files if
+their build parallelism follows the full CPU count. `compose.sh` forwards
+`CARGO_BUILD_JOBS`, which defaults to `32` and can be overridden when needed:
+
+```bash
+CARGO_BUILD_JOBS=24 ./compose.sh build
+```
+
 ## Proxy
 
 If this machine needs the host proxy setup, use one switch:

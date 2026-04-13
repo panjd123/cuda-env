@@ -130,6 +130,7 @@ print_help() {
     '  CUDA_ENV_USE_PROXY=1          Enable proxy environment overrides' \
     '  CUDA_ENV_USE_DOCKER_SOCKET=0  Disable automatic Docker socket override' \
     '  CUDA_ENV_ROOTLESS_UID_FALLBACK=0  Disable automatic uid/gid fallback for rootless Docker' \
+    '  CARGO_BUILD_JOBS=32           Cap Rust build parallelism during image build' \
     '  NVIDIA_DRIVER_BRANCH=590      Override host driver branch auto-detection' \
     '  DEV_SECRETS_PASSPHRASE=...    Required for secrets-seal / secrets-unseal, and encrypted build import' \
     '  DOCKER_SOCKET_PATH=...        Override the Docker socket path to mount' \

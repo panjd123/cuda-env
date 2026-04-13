@@ -300,10 +300,11 @@ RUN curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/inst
 
 # Rust toolchain and source-built TUI tools.
 ARG ZELLIJ_VERSION=v0.44.0
+ARG CARGO_BUILD_JOBS=32
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable && \
     . "${CARGO_HOME}/env" && \
-    cargo install --locked --version "${ZELLIJ_VERSION#v}" zellij && \
-    cargo install --force yazi-build && \
+    cargo install --jobs "${CARGO_BUILD_JOBS}" --locked --version "${ZELLIJ_VERSION#v}" zellij && \
+    cargo install --jobs "${CARGO_BUILD_JOBS}" --force yazi-build && \
     zellij --version && \
     yazi --version
 
