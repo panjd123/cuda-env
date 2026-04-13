@@ -163,12 +163,20 @@ RUN RUNZSH=no CHSH=no KEEP_ZSHRC=yes \
     git clone https://github.com/zsh-users/zsh-autosuggestions "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions" && \
     git clone https://github.com/zsh-users/zsh-syntax-highlighting.git "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
 
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
 RUN npm install -g @openai/codex && \
     if [[ -n "${DEV_SECRETS_ARCHIVE_B64:-}" ]]; then \
         tmpdir="$(mktemp -d)" && \
         printf '%s' "${DEV_SECRETS_ARCHIVE_B64}" | \
             base64 -d | \
             tar -xzf - -C "${tmpdir}" && \
+        if [[ -d "${tmpdir}/.dev-secrets/claude" ]]; then \
+            mkdir -p "${HOME}/.claude" && \
+            cp -a "${tmpdir}/.dev-secrets/claude/." "${HOME}/.claude/"; \
+            find "${HOME}/.claude" -type d -exec chmod 0700 {} +; \
+            find "${HOME}/.claude" -type f -exec chmod 0600 {} +; \
+        fi && \
         if [[ -d "${tmpdir}/.dev-secrets/codex" ]]; then \
             mkdir -p "${HOME}/.codex" && \
             cp -a "${tmpdir}/.dev-secrets/codex/." "${HOME}/.codex/"; \
@@ -180,6 +188,19 @@ RUN npm install -g @openai/codex && \
             cp -a "${tmpdir}/.dev-secrets/ssh/." "${HOME}/.ssh/"; \
             find "${HOME}/.ssh" -type d -exec chmod 0700 {} +; \
             find "${HOME}/.ssh" -type f -exec chmod 0600 {} +; \
+        fi && \
+        if [[ -f "${tmpdir}/.dev-secrets/github/gh_token" ]]; then \
+            mkdir -p "${HOME}/.config/gh" && \
+            chmod 0700 "${HOME}/.config" "${HOME}/.config/gh" && \
+            gh auth login --hostname github.com --with-token < "${tmpdir}/.dev-secrets/github/gh_token" && \
+            find "${HOME}/.config/gh" -type d -exec chmod 0700 {} + && \
+            find "${HOME}/.config/gh" -type f -exec chmod 0600 {} +; \
+        fi && \
+        if [[ -f "${tmpdir}/.dev-secrets/huggingface/token" ]]; then \
+            mkdir -p "${HOME}/.cache/huggingface" && \
+            chmod 0700 "${HOME}/.cache" "${HOME}/.cache/huggingface" && \
+            cp "${tmpdir}/.dev-secrets/huggingface/token" "${HOME}/.cache/huggingface/token" && \
+            chmod 0600 "${HOME}/.cache/huggingface/token"; \
         fi && \
         rm -rf "${tmpdir}"; \
     fi

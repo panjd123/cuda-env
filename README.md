@@ -12,7 +12,17 @@ Common behavior:
 - both images default to `zsh`
 - both images run `sshd` in the foreground by default
 - both images install dotfile in non-interactive mode
-- both images support optional import of `.dev-secrets/codex/` and `.dev-secrets/ssh/`
+- both images install `codex` and `claude`
+- `claude` is installed with the official `curl -fsSL https://claude.ai/install.sh | bash` flow
+- both images support optional import of `.dev-secrets/claude/`, `.dev-secrets/codex/`, `.dev-secrets/github/gh_token`, `.dev-secrets/huggingface/token`, and `.dev-secrets/ssh/`
+
+## Installation
+
+If you are bringing this repo up on a new machine, start with
+[docs/installation.md](docs/installation.md).
+
+That document is intentionally narrow: it tells an AI agent or human operator
+how to choose the right image, build it, start it, and verify the installation.
 
 ## Quick Start
 
@@ -65,7 +75,8 @@ Stop it:
 - falls back to `uid=0,gid=0` for the container user when rootless Docker cannot map the host uid/gid into image builds
 - auto-detects `NVIDIA_DRIVER_BRANCH` from the host when available
 - auto-enables target-specific Docker socket overrides from the active Docker endpoint when possible
-- auto-enables target-specific proxy overrides when `CUDA_ENV_USE_PROXY=1`
+- always builds with host networking
+- auto-enables target-specific proxy environment overrides when `CUDA_ENV_USE_PROXY=1`
 - prepares optional encrypted dev secrets during build-like commands
 - supports both the main CUDA environment and the smaller `docker-lite` target
 
@@ -95,9 +106,15 @@ When enabled, the wrapper will:
 
 - prefer host lowercase `http_proxy` / `https_proxy` / `no_proxy`
 - fall back to uppercase values or Docker daemon proxy settings
-- switch build to host networking
 - forward proxy variables into build args and runtime environment
-- keep runtime on bridge networking and add host reachability helpers
+- keep runtime on bridge networking
+
+Regardless of the proxy switch:
+
+- build uses host networking
+- runtime stays on bridge networking
+- containers should still be able to reach other LAN machines by IP
+- `host.docker.internal` is always mapped to the host gateway
 
 ## Secrets
 
@@ -130,7 +147,10 @@ export DEV_SECRETS_PASSPHRASE='choose-a-long-passphrase'
 
 Supported import targets inside images:
 
+- `.dev-secrets/claude/` -> `~/.claude/`
 - `.dev-secrets/codex/` -> `~/.codex/`
+- `.dev-secrets/github/gh_token` -> `gh auth login --with-token`
+- `.dev-secrets/huggingface/token` -> `~/.cache/huggingface/token`
 - `.dev-secrets/ssh/` -> `~/.ssh/`
 
 More details: [docs/secrets.md](docs/secrets.md)
@@ -243,3 +263,6 @@ ssh -p 22848 "${LOCAL_USER:-$(id -un)}"@127.0.0.1
 - [CUDA_ALTERNATIVES.md](CUDA_ALTERNATIVES.md): switching `/usr/local/cuda` between installed toolkits
 - [docs/secrets.md](docs/secrets.md): encrypted secrets workflow and import behavior
 - [docs/runtime-notes.md](docs/runtime-notes.md): GPU, SSH, Docker socket, and migration notes
+- [AGENTS.md](AGENTS.md): short cross-agent instructions and command map
+- [CLAUDE.md](CLAUDE.md): Claude-compatible entrypoint that imports `AGENTS.md`
+- [docs/installation.md](docs/installation.md): installation guide for new machines and AI agents

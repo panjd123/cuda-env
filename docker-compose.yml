@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
       args:
         CUDA_VERSION: ${CUDA_VERSION:-13.2.0}
         LOCAL_USER: ${LOCAL_USER:-devuser}
@@ -32,9 +33,15 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       CUDA_HOME: /usr/local/cuda
       HF_HOME: /home/${LOCAL_USER:-devuser}/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${CUDA_ENV_WORKSPACE_DIR}:/workspace
       - .:/workspace/cuda-env
       - ${CUDA_ENV_HF_CACHE_DIR}:/home/${LOCAL_USER:-devuser}/.cache/huggingface
     ports:
       - "22847:22"
+
+networks:
+  default:
+    driver: bridge

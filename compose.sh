@@ -95,7 +95,8 @@ print_help() {
     '  - falls back to uid/gid 0 when rootless Docker cannot map the host uid/gid into builds' \
     '  - auto-detects NVIDIA_DRIVER_BRANCH from the host when available' \
     '  - enables target-specific Docker socket overrides from the active Docker endpoint when possible' \
-    '  - enables target-specific proxy overrides when CUDA_ENV_USE_PROXY=1' \
+    '  - always builds with host networking' \
+    '  - enables target-specific proxy env overrides when CUDA_ENV_USE_PROXY=1' \
     '  - prepares optional encrypted dev secrets during build-like commands' \
     '' \
     'Wrapper-only commands:' \
@@ -126,7 +127,7 @@ print_help() {
     '  Example: `./compose.sh build --help` shows help for `docker compose build`.' \
     '' \
     'Environment switches:' \
-    '  CUDA_ENV_USE_PROXY=1          Enable proxy-aware build/runtime overrides' \
+    '  CUDA_ENV_USE_PROXY=1          Enable proxy environment overrides' \
     '  CUDA_ENV_USE_DOCKER_SOCKET=0  Disable automatic Docker socket override' \
     '  CUDA_ENV_ROOTLESS_UID_FALLBACK=0  Disable automatic uid/gid fallback for rootless Docker' \
     '  NVIDIA_DRIVER_BRANCH=590      Override host driver branch auto-detection' \

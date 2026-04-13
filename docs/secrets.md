@@ -9,9 +9,15 @@ Local plaintext secrets live under:
 
 ```text
 .dev-secrets/
+  claude/
+    settings.json
   codex/
     auth.json
     config.toml
+  github/
+    gh_token
+  huggingface/
+    token
   ssh/
     id_ed25519
     id_ed25519.pub
@@ -27,7 +33,10 @@ Repo-safe encrypted secrets live at:
 
 Supported import targets inside the images:
 
+- `.dev-secrets/claude/` -> `~/.claude/`
 - `.dev-secrets/codex/` -> `~/.codex/`
+- `.dev-secrets/github/gh_token` -> `gh auth login --with-token`
+- `.dev-secrets/huggingface/token` -> `~/.cache/huggingface/token`
 - `.dev-secrets/ssh/` -> `~/.ssh/`
 
 ## Workflow
@@ -70,6 +79,9 @@ During `./compose.sh build`, secrets are resolved in this order:
 - The image does not need `DEV_SECRETS_PASSPHRASE`, and the passphrase is not baked into image layers.
 - If `DEV_SECRETS_ARCHIVE_B64` is empty, the image skips all optional secret copy steps.
 - Imported directories are set to `0700` and imported files to `0600`.
+- If `.dev-secrets/claude/` exists, the build copies it into `~/.claude/`.
+- If `.dev-secrets/github/gh_token` exists, the build runs `gh auth login` and writes the authenticated state into `~/.config/gh/`.
+- If `.dev-secrets/huggingface/token` exists, the build writes it to the default Hugging Face token path under `~/.cache/huggingface/token`.
 
 ## Dotfile Interaction
 

@@ -10,7 +10,6 @@ ARG GIT_EMAIL=xm_jarden@qq.com
 ARG DOTFILE_REPO_URL=https://github.com/panjd123/dotfile.git
 ARG NVM_VERSION=v0.40.4
 ARG NODE_VERSION=24.14.1
-ARG CLAUDE_CODE_VERSION=latest
 ARG DEV_SECRETS_ARCHIVE_B64
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
@@ -40,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
     git-lfs \
+    gh \
     openssh-server \
     openssh-client \
     rsync \
@@ -198,7 +198,6 @@ ENV LOCAL_USER=${LOCAL_USER} \
     GIT_USER=${GIT_USER} \
     GIT_EMAIL=${GIT_EMAIL} \
     DOTFILE_REPO_URL=${DOTFILE_REPO_URL} \
-    CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} \
     HOME=/home/${LOCAL_USER} \
     SHELL=/usr/bin/zsh \
     DEV_SHELL_ENV=/home/${LOCAL_USER}/.shell_env \
@@ -313,6 +312,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     source "${BASH_ENV}" && \
     uv tool install nvidia-htop
 
+# Claude Code official installer.
+RUN source "${BASH_ENV}" && \
+    curl -fsSL https://claude.ai/install.sh | bash
+
 # Node-based CLI tools and optional host secrets import.
 RUN source "${BASH_ENV}" && \
     npm install -g @openai/codex && \
@@ -321,6 +324,12 @@ RUN source "${BASH_ENV}" && \
         printf '%s' "${DEV_SECRETS_ARCHIVE_B64}" | \
             base64 -d | \
             tar -xzf - -C "${tmpdir}" && \
+        if [[ -d "${tmpdir}/.dev-secrets/claude" ]]; then \
+            mkdir -p "${HOME}/.claude" && \
+            cp -a "${tmpdir}/.dev-secrets/claude/." "${HOME}/.claude/"; \
+            find "${HOME}/.claude" -type d -exec chmod 0700 {} +; \
+            find "${HOME}/.claude" -type f -exec chmod 0600 {} +; \
+        fi && \
         if [[ -d "${tmpdir}/.dev-secrets/codex" ]]; then \
             mkdir -p "${HOME}/.codex" && \
             cp -a "${tmpdir}/.dev-secrets/codex/." "${HOME}/.codex/"; \
@@ -333,11 +342,21 @@ RUN source "${BASH_ENV}" && \
             find "${HOME}/.ssh" -type d -exec chmod 0700 {} +; \
             find "${HOME}/.ssh" -type f -exec chmod 0600 {} +; \
         fi && \
+        if [[ -f "${tmpdir}/.dev-secrets/github/gh_token" ]]; then \
+            mkdir -p "${HOME}/.config/gh" && \
+            chmod 0700 "${HOME}/.config" "${HOME}/.config/gh" && \
+            gh auth login --hostname github.com --with-token < "${tmpdir}/.dev-secrets/github/gh_token" && \
+            find "${HOME}/.config/gh" -type d -exec chmod 0700 {} + && \
+            find "${HOME}/.config/gh" -type f -exec chmod 0600 {} +; \
+        fi && \
+        if [[ -f "${tmpdir}/.dev-secrets/huggingface/token" ]]; then \
+            mkdir -p "${HOME}/.cache/huggingface" && \
+            chmod 0700 "${HOME}/.cache" "${HOME}/.cache/huggingface" && \
+            cp "${tmpdir}/.dev-secrets/huggingface/token" "${HOME}/.cache/huggingface/token" && \
+            chmod 0600 "${HOME}/.cache/huggingface/token"; \
+        fi && \
         rm -rf "${tmpdir}"; \
     fi
-
-# Claude Code native installer.
-RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
 
 EXPOSE 22
 

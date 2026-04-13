@@ -8,12 +8,13 @@ for debugging, migration, and host-specific setup validation.
 - `compose.sh` prefers `~/.local/bin/docker` when it exists.
 - `compose.sh` resolves the active Docker endpoint from `DOCKER_HOST` or the current Docker context, so both rootful and rootless Unix sockets work.
 - `compose.sh` provisions a persistent host workspace directory for `/workspace`, defaulting to `.cuda-env-state/workspace` in the repo unless `CUDA_ENV_WORKSPACE_DIR` overrides it.
+- Build always uses host networking.
 - `CUDA_ENV_USE_PROXY=1` is the single switch for proxy-aware behavior:
-  - build uses host networking
   - build and runtime both receive the host proxy environment
-  - runtime keeps bridge networking and also gets `host.docker.internal`
 - When the active Docker endpoint resolves to a Unix socket and `CUDA_ENV_USE_DOCKER_SOCKET` is not set to `0`, `compose.sh` automatically adds the target-specific socket override so either image can talk to the host Docker engine.
 - On rootless Docker, `compose.sh` can automatically fall back to `uid=0,gid=0` for the container user when the host uid/gid are outside the mapped subuid/subgid range.
+- runtime always keeps bridge networking
+- `host.docker.internal` is always mapped to the host gateway, even when proxy support is disabled
 - `compose.sh` auto-detects `NVIDIA_DRIVER_BRANCH` from the host driver version unless you set it explicitly.
 - Both images default to running `sshd` in the foreground from their Dockerfiles.
 - The repo bind mount lives at `/workspace/cuda-env`; `/workspace` itself is a separate persistent workspace root.
