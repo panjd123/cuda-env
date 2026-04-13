@@ -281,6 +281,8 @@ ARG http_proxy
 ARG https_proxy
 ARG no_proxy
 
+USER root
+
 RUN if [[ -n "${NVIDIA_DRIVER_BRANCH:-}" ]]; then \
         apt-get update && \
         apt-get install -y --no-install-recommends \
