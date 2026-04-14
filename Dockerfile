@@ -281,6 +281,7 @@ ARG http_proxy
 ARG https_proxy
 ARG no_proxy
 
+# Final-stage system package install and host user setup require root.
 USER root
 
 RUN if [[ -n "${NVIDIA_DRIVER_BRANCH:-}" ]]; then \
@@ -308,8 +309,6 @@ ENV LOCAL_USER=${LOCAL_USER} \
     NVM_SYMLINK_CURRENT=true \
     PATH=/home/${LOCAL_USER}/.local/bin:/home/${LOCAL_USER}/.cargo/bin:/home/${LOCAL_USER}/.nvm/current/bin:/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH}
-
-USER root
 
 RUN if [[ "${LOCAL_UID}" == "0" && "${LOCAL_GID}" == "0" && "${LOCAL_USER}" != "root" ]]; then \
         if id -u "${LOCAL_USER}" >/dev/null 2>&1; then \
