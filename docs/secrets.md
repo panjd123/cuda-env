@@ -89,6 +89,7 @@ template stage never unpacks `.dev-secrets/*`.
 - If `.dev-secrets/claude/` exists, the build copies it into `~/.claude/`.
 - If `.dev-secrets/github/gh_token` exists, the build runs `gh auth login` and writes the authenticated state into `~/.config/gh/`.
 - If `.dev-secrets/huggingface/token` exists, the build writes it to the default Hugging Face token path under `~/.cache/huggingface/token`.
+- `cuda-env` runtime keeps that token path inside the container and only bind-mounts Hugging Face cache subdirectories from the host, so the imported token is not overwritten by the host cache mount.
 
 ## Dotfile Interaction
 

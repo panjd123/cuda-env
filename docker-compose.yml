@@ -40,7 +40,11 @@ services:
     volumes:
       - ${CUDA_ENV_WORKSPACE_DIR}:/workspace
       - .:/workspace/cuda-env
-      - ${CUDA_ENV_HF_CACHE_DIR}:/home/${LOCAL_USER:-devuser}/.cache/huggingface
+      - ${CUDA_ENV_HF_CACHE_DIR}/hub:/home/${LOCAL_USER:-devuser}/.cache/huggingface/hub
+      - ${CUDA_ENV_HF_CACHE_DIR}/datasets:/home/${LOCAL_USER:-devuser}/.cache/huggingface/datasets
+      - ${CUDA_ENV_HF_CACHE_DIR}/modules:/home/${LOCAL_USER:-devuser}/.cache/huggingface/modules
+      - ${CUDA_ENV_HF_CACHE_DIR}/xet:/home/${LOCAL_USER:-devuser}/.cache/huggingface/xet
+      - ${CUDA_ENV_HF_CACHE_DIR}/assets:/home/${LOCAL_USER:-devuser}/.cache/huggingface/assets
     ports:
       - "22847:22"
 

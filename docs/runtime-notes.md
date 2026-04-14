@@ -24,6 +24,7 @@ for debugging, migration, and host-specific setup validation.
 - Host port `22847` maps to `cuda-env:22`.
 - Host port `22848` maps to `docker-lite:22`.
 - The default interactive shell is `zsh`, with `oh-my-zsh`, `zsh-autosuggestions`, and `zsh-syntax-highlighting`.
+- `cuda-env` keeps the Hugging Face token inside the image/user home and only bind-mounts cache-heavy subdirectories such as `hub/`, `datasets/`, `modules/`, `xet/`, and `assets/` from the host cache root.
 
 ## GPU Notes
 
@@ -113,7 +114,28 @@ Useful host checks:
 If you are checking manually, inspect the resolved socket path instead of
 assuming `/var/run/docker.sock`.
 
-### 4. Rootless UID/GID Fallback
+### 4. Hugging Face Token vs Host Cache
+
+`cuda-env` imports the optional Hugging Face token during image build into:
+
+```text
+~/.cache/huggingface/token
+```
+
+To avoid host cache mounts overwriting that token, compose does not mount the
+entire host Hugging Face cache directory anymore. It mounts only cache-heavy
+subdirectories from `${CUDA_ENV_HF_CACHE_DIR}`:
+
+- `hub/`
+- `datasets/`
+- `modules/`
+- `xet/`
+- `assets/`
+
+This keeps large caches persistent on the host without replacing the token file
+inside the container.
+
+### 5. Rootless UID/GID Fallback
 
 Rootless Docker can only map container ids that fit inside the caller's
 subuid/subgid allocation. If your host uid/gid are larger than that range,

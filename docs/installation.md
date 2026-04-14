@@ -31,6 +31,11 @@ Build modes:
 - `CUDA_ENV_BUILD_MODE=full`: build the template and final stages locally
 - `CUDA_ENV_BUILD_MODE=template`: pull the published template image first, then build only the final local stage
 
+This behavior assumes a modern Docker build path with BuildKit enabled. If the
+host Docker version is too old, or the build does not actually use BuildKit,
+the `template` mode may fail to skip the unused local template stage as
+intended, which can make the build slower than expected.
+
 ## 0. AI Interaction Rules
 
 If you are an AI agent following this document, use these rules:
@@ -59,6 +64,7 @@ Before building, verify:
 - the repo is cloned locally
 - `docker` works on the host
 - `docker compose` works on the host
+- Docker is new enough to use modern BuildKit-based builds
 - if Docker socket passthrough is expected, `/var/run/docker.sock` exists
 - if proxy is needed, host `http_proxy` / `https_proxy` / `no_proxy` are set
 - if only encrypted secrets are available, `DEV_SECRETS_PASSPHRASE` is known
@@ -67,10 +73,15 @@ Useful checks:
 
 ```bash
 docker info
+docker buildx version
 docker compose version
 ls -l /var/run/docker.sock
 printf 'http_proxy=%s\nhttps_proxy=%s\nno_proxy=%s\n' "${http_proxy:-}" "${https_proxy:-}" "${no_proxy:-}"
 ```
+
+If `docker buildx version` is missing or the Docker installation is very old,
+expect `CUDA_ENV_BUILD_MODE=template` to be slower than expected because the
+unused local template stage may not be skipped cleanly.
 
 If you plan to use `cuda-env`, also verify:
 
@@ -146,6 +157,10 @@ Possible imported targets include:
 - `~/.ssh/`
 - GitHub CLI authenticated state
 - `~/.cache/huggingface/token`
+
+For `cuda-env`, the runtime only bind-mounts Hugging Face cache subdirectories
+from the host. The token file itself stays inside the built image/user home, so
+an old host cache token should not override the imported token anymore.
 
 ## 5. Install `docker-lite`
 
