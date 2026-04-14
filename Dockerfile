@@ -27,6 +27,7 @@ RUN printf '%s\n' \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo \
     ca-certificates \
+    bubblewrap \
     curl \
     wget \
     git \
